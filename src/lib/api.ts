@@ -1,5 +1,5 @@
 // API client for nexus-backend
-const BASE = (import.meta.env.VITE_API_URL as string) || "http://localhost:4000/api";
+const BASE = (import.meta.env.VITE_API_URL as string) || "https://api.nexus-x.site/api";
 const TOKEN_KEY = "nexus_token";
 
 export const tokenStore = {
