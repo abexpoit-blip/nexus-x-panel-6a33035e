@@ -38,11 +38,11 @@ export const NotificationPanel = () => {
   const toggleSound = () => updatePreferences({ soundEnabled: !soundEnabled });
 
   return (
-    <AnimatePresence>
-      {panelOpen && (
-        <>
-          {/* Backdrop */}
+    <>
+      <AnimatePresence>
+        {panelOpen && (
           <motion.div
+            key="backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -50,9 +50,12 @@ export const NotificationPanel = () => {
             className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm"
             onClick={closePanel}
           />
-
-          {/* Panel */}
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {panelOpen && (
           <motion.div
+            key="panel"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
@@ -175,8 +178,8 @@ export const NotificationPanel = () => {
               </div>
             )}
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </>
   );
 };

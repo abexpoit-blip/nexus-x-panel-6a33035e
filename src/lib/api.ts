@@ -46,6 +46,13 @@ export type Payment = {
   id: number; user_id: number; username?: string; amount_bdt: number;
   type: string; method?: string; reference?: string; note?: string; created_at: number;
 };
+export type Withdrawal = {
+  id: number; user_id: number; username?: string; amount_bdt: number;
+  method: string; account_name?: string; account_number: string;
+  status: "pending" | "approved" | "rejected"; note?: string;
+  admin_note?: string; reviewed_by?: number; reviewed_at?: number;
+  created_at: number;
+};
 export type Notification = {
   id: number; user_id: number | null; title: string; message: string;
   type: string; is_read: number; created_at: number;
@@ -90,6 +97,19 @@ export const api = {
     all: () => request<{ payments: Payment[] }>("/payments"),
     topup: (body: { user_id: number; amount_bdt: number; method?: string; reference?: string; note?: string }) =>
       request("/payments/topup", { method: "POST", body: JSON.stringify(body) }),
+  },
+
+  // Withdrawals (Phase 3 — Revenue auto-engine)
+  withdrawals: {
+    mine: () => request<{ withdrawals: Withdrawal[] }>("/withdrawals/mine"),
+    pending: () => request<{ withdrawals: Withdrawal[] }>("/withdrawals/pending"),
+    all: () => request<{ withdrawals: Withdrawal[] }>("/withdrawals"),
+    request: (body: { amount_bdt: number; method: string; account_name?: string; account_number: string; note?: string }) =>
+      request<{ id: number }>("/withdrawals/request", { method: "POST", body: JSON.stringify(body) }),
+    approve: (id: number, admin_note?: string) =>
+      request(`/withdrawals/${id}/approve`, { method: "POST", body: JSON.stringify({ admin_note }) }),
+    reject: (id: number, admin_note?: string) =>
+      request(`/withdrawals/${id}/reject`, { method: "POST", body: JSON.stringify({ admin_note }) }),
   },
 
   // Notifications
