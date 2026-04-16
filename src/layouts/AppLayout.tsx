@@ -4,7 +4,8 @@ import { AnimatedOutlet } from "@/components/AnimatedOutlet";
 import { useAuth, type UserRole } from "@/contexts/AuthContext";
 import { AppSidebar } from "./Sidebar";
 import { NotificationBell } from "@/components/NotificationBell";
-import { Menu, Wallet } from "lucide-react";
+import { CommandPalette } from "@/components/CommandPalette";
+import { Menu, Wallet, Search } from "lucide-react";
 
 interface AppLayoutProps {
   requiredRole: UserRole;
