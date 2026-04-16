@@ -117,7 +117,7 @@ const AgentGetNumber = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-display font-bold text-foreground">Get Number</h1>
-        <p className="text-sm text-muted-foreground mt-1">Request real numbers from connected providers</p>
+        <p className="text-sm text-muted-foreground mt-1">Request a fresh number — select country and operator</p>
       </div>
 
       <GlassCard glow="cyan">
