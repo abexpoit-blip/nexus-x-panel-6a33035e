@@ -178,8 +178,8 @@ export const NotificationPanel = () => {
               </div>
             )}
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </>
   );
 };
