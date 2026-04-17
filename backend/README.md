@@ -21,18 +21,23 @@ Server will start on `http://localhost:4000`. Default admin: `admin / admin123` 
 
 ## 📦 Deploy to VPS (Ubuntu 22.04)
 
-### 1. Install Node.js 20 + pm2
+### 1. Install Node.js 20 + pm2 + Chromium dependencies (for IMS bot)
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+sudo apt install -y nodejs chromium-browser
 sudo npm install -g pm2
+
+# Puppeteer needs these libs on a fresh server:
+sudo apt install -y \
+  libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+  libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+  libcairo2 libasound2 libpangocairo-1.0-0 fonts-liberation
 ```
 
 ### 2. Upload backend folder
 
 ```bash
-# from your local machine
 scp -r backend/ user@YOUR_VPS_IP:/var/www/nexus-backend/
 ssh user@YOUR_VPS_IP
 cd /var/www/nexus-backend
@@ -42,9 +47,9 @@ cd /var/www/nexus-backend
 
 ```bash
 cp .env.example .env
-nano .env                       # set real values, IMPORTANT!
-npm install --production
-mkdir -p data                   # SQLite file lives here
+nano .env                       # set ALL real values: passwords, JWT_SECRET, AccHub & IMS creds
+npm install --production        # also downloads Puppeteer's bundled Chromium (~170MB)
+mkdir -p data
 ```
 
 ### 4. Start with pm2
