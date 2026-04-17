@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square, KeyRound, Save, Eye, EyeOff, Zap, Layers } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square, KeyRound, Save, Eye, EyeOff, Zap, Layers, ClipboardPaste, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -176,6 +176,12 @@ const AdminImsStatus = () => {
 
           {/* Credentials editor */}
           <CredentialsEditor onSaved={() => refetch()} />
+
+          {/* Manual paste-numbers */}
+          <ManualPastePool
+            existingRanges={poolData?.ranges?.map(r => r.name) ?? []}
+            onAdded={() => { refetch(); refetchPool(); }}
+          />
 
           {/* Auto-pause meter */}
           {(s.emptyLimit ?? 0) > 0 && (
@@ -501,5 +507,180 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
     {children}
   </div>
 );
+
+const ManualPastePool = ({ existingRanges, onAdded }: { existingRanges: string[]; onAdded: () => void }) => {
+  const [open, setOpen] = useState(false);
+  const [rangeMode, setRangeMode] = useState<"existing" | "new">("existing");
+  const [selectedRange, setSelectedRange] = useState("");
+  const [newRange, setNewRange] = useState("");
+  const [countryCode, setCountryCode] = useState("");
+  const [raw, setRaw] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Live parse preview
+  const parsed = raw
+    .split(/[\s,;\n\r\t]+/)
+    .map((s) => s.replace(/[^\d+]/g, "").replace(/^\++/, "+"))
+    .filter((s) => s.replace(/\D/g, "").length >= 6);
+  const uniqueCount = new Set(parsed).size;
+
+  const reset = () => {
+    setRaw(""); setNewRange(""); setSelectedRange(""); setCountryCode("");
+  };
+
+  const submit = async () => {
+    const range = (rangeMode === "existing" ? selectedRange : newRange).trim();
+    if (!range) { toast.error("Range name required"); return; }
+    if (!parsed.length) { toast.error("Paste at least one valid number"); return; }
+    setSubmitting(true);
+    try {
+      const r = await api.imsAddPool({
+        numbers: Array.from(new Set(parsed)),
+        range,
+        country_code: countryCode.trim() || undefined,
+      });
+      toast.success(`Added ${r.added} numbers to "${r.range}"` +
+        (r.skipped ? ` · ${r.skipped} duplicates skipped` : "") +
+        (r.invalid ? ` · ${r.invalid} invalid` : ""));
+      reset();
+      onAdded();
+    } catch (e) {
+      toast.error("Add failed: " + (e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="glass-card border border-white/[0.06] rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-neon-magenta/10 border border-neon-magenta/20 flex items-center justify-center">
+            <ClipboardPaste className="w-4 h-4 text-neon-magenta" />
+          </div>
+          <div className="text-left">
+            <div className="text-sm font-semibold">Manual Paste — Add Numbers to Pool</div>
+            <div className="text-xs text-muted-foreground">
+              Paste copied numbers from IMS, pick a range, instantly available to agents
+            </div>
+          </div>
+        </div>
+        <span className="text-xs text-muted-foreground">{open ? "Hide" : "Open"}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06] p-5 space-y-4 bg-black/20">
+          <p className="text-xs text-muted-foreground flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-neon-magenta" />
+            Numbers are deduplicated against the current pool. Range name is what agents see in the dropdown
+            (e.g. <code className="font-mono text-foreground/80">Peru Bitel TF04</code>).
+          </p>
+
+          {/* Range chooser */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Range">
+              <div className="flex gap-1 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setRangeMode("existing")}
+                  className={cn(
+                    "px-3 py-1 rounded text-xs font-semibold transition border",
+                    rangeMode === "existing"
+                      ? "bg-neon-magenta/15 border-neon-magenta/40 text-neon-magenta"
+                      : "bg-white/[0.03] border-white/[0.08] text-muted-foreground hover:text-foreground"
+                  )}
+                  disabled={!existingRanges.length}
+                >
+                  Existing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRangeMode("new")}
+                  className={cn(
+                    "px-3 py-1 rounded text-xs font-semibold transition border inline-flex items-center gap-1",
+                    rangeMode === "new"
+                      ? "bg-neon-magenta/15 border-neon-magenta/40 text-neon-magenta"
+                      : "bg-white/[0.03] border-white/[0.08] text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Plus className="w-3 h-3" /> New
+                </button>
+              </div>
+              {rangeMode === "existing" ? (
+                <select
+                  value={selectedRange}
+                  onChange={(e) => setSelectedRange(e.target.value)}
+                  className="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-2 text-sm focus:border-neon-magenta/50 outline-none"
+                >
+                  <option value="">— select existing range —</option>
+                  {existingRanges.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={newRange}
+                  onChange={(e) => setNewRange(e.target.value)}
+                  placeholder="e.g. Peru Bitel TF04"
+                  className="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-2 text-sm font-mono focus:border-neon-magenta/50 outline-none"
+                />
+              )}
+            </Field>
+            <Field label="Country Code (optional, e.g. PE)">
+              <input
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
+                maxLength={4}
+                placeholder="PE"
+                className="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-2 text-sm font-mono uppercase focus:border-neon-magenta/50 outline-none"
+              />
+            </Field>
+          </div>
+
+          <Field label={`Numbers — paste one per line, comma, or space (${uniqueCount} unique detected)`}>
+            <textarea
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              placeholder={"+5117654321\n+5117654322\n+5117654323\n..."}
+              className="w-full bg-black/40 border border-white/[0.08] rounded-md px-3 py-2 text-sm font-mono focus:border-neon-magenta/50 outline-none resize-y"
+            />
+          </Field>
+
+          {parsed.length > 0 && (
+            <div className="text-xs text-muted-foreground flex flex-wrap gap-3">
+              <span>Parsed: <span className="text-foreground font-mono">{parsed.length}</span></span>
+              <span>Unique: <span className="text-neon-green font-mono">{uniqueCount}</span></span>
+              {parsed.length !== uniqueCount && (
+                <span>Duplicates in input: <span className="text-neon-amber font-mono">{parsed.length - uniqueCount}</span></span>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={reset}
+              className="px-4 py-2 rounded-md text-xs font-semibold bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition"
+            >
+              Clear
+            </button>
+            <button
+              onClick={submit}
+              disabled={submitting || !uniqueCount}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
+            >
+              <Plus className={cn("w-3.5 h-3.5", submitting && "animate-pulse")} />
+              {submitting ? "Adding…" : `Add ${uniqueCount || ""} to pool`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default AdminImsStatus;
