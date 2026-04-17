@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -66,15 +66,19 @@ const AdminImsStatus = () => {
   });
   const s = data?.status as ImsStatus | undefined;
 
-  const handleRestart = async () => {
-    if (!confirm("Restart the IMS bot? Current scrape will be interrupted.")) return;
+  const handleAction = async (action: "restart" | "start" | "stop") => {
+    const labels = { restart: "Restart", start: "Start", stop: "Stop" };
+    if (action === "stop" && !confirm("Stop the IMS bot? It will stop scraping until restarted.")) return;
+    if (action === "restart" && !confirm("Restart the IMS bot? Current scrape will be interrupted.")) return;
     setRestarting(true);
     try {
-      await api.admin.imsRestart();
-      toast.success("Bot restart initiated");
-      setTimeout(() => refetch(), 2000);
+      if (action === "restart") await api.admin.imsRestart();
+      else if (action === "start") await api.admin.imsStart();
+      else await api.admin.imsStop();
+      toast.success(`${labels[action]} initiated`);
+      setTimeout(() => refetch(), 1500);
     } catch (e) {
-      toast.error("Restart failed: " + (e as Error).message);
+      toast.error(`${labels[action]} failed: ` + (e as Error).message);
     } finally {
       setRestarting(false);
     }
@@ -89,13 +93,30 @@ const AdminImsStatus = () => {
         description="Headless browser scraper running on the VPS — live numbers + OTP delivery"
         icon={<Bot className="w-5 h-5 text-neon-magenta" />}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {s?.running ? (
+              <button
+                onClick={() => handleAction("stop")}
+                disabled={restarting}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20 transition disabled:opacity-50"
+              >
+                <Square className="w-3.5 h-3.5" /> Stop
+              </button>
+            ) : (
+              <button
+                onClick={() => handleAction("start")}
+                disabled={restarting}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-green/10 border border-neon-green/30 text-neon-green hover:bg-neon-green/20 transition disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5" /> Start
+              </button>
+            )}
             <button
-              onClick={handleRestart}
+              onClick={() => handleAction("restart")}
               disabled={restarting}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
             >
-              <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Restarting…" : "Restart Bot"}
+              <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Working…" : "Restart"}
             </button>
             <button
               onClick={() => refetch()}
