@@ -10,7 +10,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { GradientMesh, PageHeader } from "@/components/premium";
 
-const empty: Partial<Rate> & { agent_commission_percent?: number } = { provider: "msi", country_code: "", country_name: "", operator: "", price_bdt: 0, active: 1, agent_commission_percent: 60 };
+// Global default per provider — no country/operator. Backend commission lookup
+// will fall back to this row whenever a more specific match doesn't exist.
+const empty: Partial<Rate> & { agent_commission_percent?: number } = {
+  provider: "acchub", country_code: null as any, country_name: null as any,
+  operator: null as any, price_bdt: 0, active: 1, agent_commission_percent: 60,
+};
 
 const AdminRateCard = () => {
   const qc = useQueryClient();
