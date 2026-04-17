@@ -256,6 +256,76 @@ const AdminSecurity = () => {
           </div>
         </GlassCard>
       )}
+      {tab === "maintenance" && (
+        <GlassCard glow={maintenanceMode ? "amber" : undefined}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={cn(
+                "w-14 h-14 rounded-2xl flex items-center justify-center",
+                maintenanceMode ? "bg-neon-amber/15" : "bg-neon-green/10"
+              )}>
+                <Wrench className={cn("w-7 h-7", maintenanceMode ? "text-neon-amber" : "text-neon-green")} />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-foreground text-lg">Maintenance Mode</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {maintenanceMode
+                    ? "Agents CANNOT request numbers right now"
+                    : "System OPEN — agents can request numbers normally"}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                setMaintenanceMode(!maintenanceMode, draftMsg);
+                toast.success(maintenanceMode ? "Maintenance disabled — agents can request numbers" : "Maintenance enabled — agents are blocked");
+              }}
+              className={cn(
+                "h-11 font-semibold border-0 px-6",
+                maintenanceMode
+                  ? "bg-gradient-to-r from-primary to-neon-green text-primary-foreground hover:opacity-90"
+                  : "bg-neon-amber/20 text-neon-amber hover:bg-neon-amber/30"
+              )}
+            >
+              {maintenanceMode
+                ? <><Power className="w-4 h-4 mr-2" /> Disable Maintenance</>
+                : <><Wrench className="w-4 h-4 mr-2" /> Enable Maintenance</>}
+            </Button>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-white/[0.06] space-y-3">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Banner message shown to agents</label>
+            <Textarea
+              value={draftMsg}
+              onChange={(e) => setDraftMsg(e.target.value)}
+              placeholder="System is under maintenance. Please try again later."
+              rows={3}
+              className="bg-white/[0.04] border-white/[0.1] resize-none"
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setMaintenanceMode(maintenanceMode, draftMsg);
+                  toast.success("Message saved");
+                }}
+                className="glass border-white/[0.1] hover:bg-white/[0.06]"
+              >
+                Save message
+              </Button>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <div className={cn("w-3 h-3 rounded-full", maintenanceMode ? "bg-neon-amber animate-pulse" : "bg-neon-green")} />
+              <span className="text-sm text-muted-foreground">
+                Status: <span className={cn("font-semibold", maintenanceMode ? "text-neon-amber" : "text-neon-green")}>
+                  {maintenanceMode ? "MAINTENANCE" : "OPERATIONAL"}
+                </span>
+              </span>
+            </div>
+          </div>
+        </GlassCard>
+      )}
     </div>
   );
 };
