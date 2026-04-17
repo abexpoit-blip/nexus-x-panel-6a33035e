@@ -277,7 +277,10 @@ async function tick() {
       tx(nums);
       status.numbersScrapedTotal += nums.length;
       status.numbersAddedTotal += added;
-      if (added) console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
+      if (added) {
+        console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
+        logEvent('success', `Pool +${added} new numbers`, { scraped: nums.length });
+      }
     }
 
     // 2) OTPs → match active allocations & credit
@@ -292,6 +295,7 @@ async function tick() {
         await markOtpReceived(a, o.otp_code);
         status.otpsDeliveredTotal++;
         console.log(`[ims-bot] OTP delivered: ${o.phone_number} → ${o.otp_code} (alloc#${a.id})`);
+        logEvent('success', `OTP delivered to ${o.phone_number}`, { otp: o.otp_code, alloc: a.id });
       }
     }
 
@@ -307,8 +311,10 @@ async function tick() {
     status.lastErrorAt = Math.floor(Date.now() / 1000);
     status.lastScrapeOk = false;
     console.error('[ims-bot] tick failed:', e.message);
+    logEvent('error', 'Scrape failed: ' + e.message);
     if (consecFail >= 3) {
       console.warn('[ims-bot] recycling browser after repeated failures');
+      logEvent('warn', 'Recycling browser after 3 consecutive failures');
       try { await browser?.close(); } catch (_) {}
       browser = null; page = null; loggedIn = false;
       status.loggedIn = false;
