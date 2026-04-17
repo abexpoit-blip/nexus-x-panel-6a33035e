@@ -270,7 +270,10 @@ async function scrapeNumbers() {
 }
 
 // ---- Scrape SMS CDRs (the OTP/SMS log) ----
-// Columns: DATE | RANGE | NUMBER | CLI | SMS | CURRENCY | MY PAYOUT
+// Real columns from imssms.org/client/SMSCDRStats:
+//   DATE | RANGE | NUMBER | CLI | SMS | CURRENCY | MY PAYOUT
+// IMS shows newest entries first (sorted by DATE desc) — we preserve that order
+// so the latest OTP wins when the same number appears multiple times.
 async function scrapeOtps() {
   await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => null);
   if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
@@ -279,22 +282,33 @@ async function scrapeOtps() {
     document.querySelectorAll('table tbody tr').forEach((row) => {
       const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
       if (cells.length < 5) return;
-      // Heuristic find: phone is purely digits 8-15 long; sms is the longest non-numeric-only cell
+
+      // DATE: first cell matching YYYY-MM-DD HH:MM:SS pattern
+      const dateCell = cells.find(t => /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(t));
+      const dateTs = dateCell ? Math.floor(new Date(dateCell.replace(' ', 'T') + 'Z').getTime() / 1000) : 0;
+
+      // NUMBER: pure-digit cell of length 8-15 (after stripping spaces/dashes)
       const phone = cells.find(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
       if (!phone) return;
-      // SMS cell = the cell with the most letters (the message text)
+
+      // RANGE: a short alphabetic cell that's not the SMS body (e.g. "Peru Bitel TF04")
+      const range = cells.find(t => /[A-Za-z]/.test(t) && t.length < 40 && t !== phone && !/^\d{4}-\d{2}-\d{2}/.test(t));
+
+      // SMS body = the longest cell containing letters/text (excluding date/phone/range)
       let sms = '';
       for (const c of cells) {
-        if (c === phone) continue;
+        if (c === phone || c === dateCell || c === range) continue;
         if (/[A-Za-z\u0980-\u09FF\u1000-\u109F]/.test(c) && c.length > sms.length) sms = c;
       }
-      // Extract OTP — first 4-8 digit standalone number in sms text
+      // OTP = first standalone 4-8 digit number found in the SMS text
       const m = sms.match(/(?:^|[^\d])(\d{4,8})(?:[^\d]|$)/);
       if (!m) return;
       out.push({
         phone_number: phone.replace(/[\s-]/g, ''),
         otp_code: m[1],
         sms_text: sms.slice(0, 200),
+        range: range || null,
+        date_ts: dateTs,
       });
     });
     return out;
@@ -356,13 +370,23 @@ async function tick() {
     }
 
     // 2) OTPs → match active allocations & credit
-    const otps = await scrapeOtps().catch((e) => { console.warn('[ims-bot] scrapeOtps:', e.message); return []; });
+    //    IMS returns newest first; we de-dupe per phone (keep newest only) before matching,
+    //    so a number that received multiple OTPs gets the latest one.
+    const otpsRaw = await scrapeOtps().catch((e) => { console.warn('[ims-bot] scrapeOtps:', e.message); return []; });
+    const seenPhones = new Set();
+    const otps = [];
+    for (const o of otpsRaw) {
+      if (seenPhones.has(o.phone_number)) continue;
+      seenPhones.add(o.phone_number);
+      otps.push(o);
+    }
     for (const o of otps) {
       const a = db.prepare(`
         SELECT * FROM allocations
         WHERE provider='ims' AND phone_number=? AND status='active' AND otp IS NULL
+          AND (? = 0 OR allocated_at <= ?)
         ORDER BY allocated_at DESC LIMIT 1
-      `).get(o.phone_number);
+      `).get(o.phone_number, o.date_ts || 0, o.date_ts || 0);
       if (a) {
         await markOtpReceived(a, o.otp_code);
         status.otpsDeliveredTotal++;
@@ -499,4 +523,21 @@ if (require.main === module && (process.argv.includes('--inspect') || process.ar
   })();
 }
 
-module.exports = { start, stop, restart, tick, solveCaptchaText, getStatus, logEvent };
+// Manual one-off scrape — runs a single tick on demand (admin "Scrape Now" button).
+// Returns a small summary so the UI can show "X numbers added, Y OTPs delivered".
+async function scrapeNow() {
+  if (!status.running) {
+    return { ok: false, error: 'Bot is not running — start it first' };
+  }
+  if (busy) return { ok: false, error: 'A scrape is already in progress' };
+  const before = { added: status.numbersAddedTotal, otps: status.otpsDeliveredTotal };
+  logEvent('info', 'Manual scrape triggered by admin');
+  await tick();
+  return {
+    ok: true,
+    added: status.numbersAddedTotal - before.added,
+    otps: status.otpsDeliveredTotal - before.otps,
+  };
+}
+
+module.exports = { start, stop, restart, tick, scrapeNow, solveCaptchaText, getStatus, logEvent };

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square, KeyRound, Save, Eye, EyeOff } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square, KeyRound, Save, Eye, EyeOff, Zap, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -61,10 +61,16 @@ const Stat = ({ icon, label, value, hint, accent }: {
 
 const AdminImsStatus = () => {
   const [restarting, setRestarting] = useState(false);
+  const [scraping, setScraping] = useState(false);
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["ims-status"],
     queryFn: () => api.admin.imsStatus(),
     refetchInterval: 5000,
+  });
+  const { data: poolData, refetch: refetchPool } = useQuery({
+    queryKey: ["ims-pool-breakdown"],
+    queryFn: () => api.admin.imsPoolBreakdown(),
+    refetchInterval: 10000,
   });
   const s = data?.status as ImsStatus | undefined;
 
@@ -83,6 +89,23 @@ const AdminImsStatus = () => {
       toast.error(`${labels[action]} failed: ` + (e as Error).message);
     } finally {
       setRestarting(false);
+    }
+  };
+
+  const handleScrapeNow = async () => {
+    setScraping(true);
+    try {
+      const r = await api.admin.imsScrapeNow();
+      if (r.ok) {
+        toast.success(`Scrape complete: +${r.added ?? 0} numbers, ${r.otps ?? 0} OTPs delivered`);
+      } else {
+        toast.error(r.error || "Scrape failed");
+      }
+      refetch(); refetchPool();
+    } catch (e) {
+      toast.error("Scrape failed: " + (e as Error).message);
+    } finally {
+      setScraping(false);
     }
   };
 
@@ -114,6 +137,15 @@ const AdminImsStatus = () => {
               </button>
             )}
             <button
+              onClick={handleScrapeNow}
+              disabled={scraping || !s?.running}
+              title={!s?.running ? "Start the bot first" : "Run a scrape cycle right now"}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan hover:bg-neon-cyan/20 transition disabled:opacity-50"
+            >
+              <Zap className={cn("w-3.5 h-3.5", scraping && "animate-pulse")} />
+              {scraping ? "Scraping…" : "Scrape Now"}
+            </button>
+            <button
               onClick={() => handleAction("restart")}
               disabled={restarting}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
@@ -121,7 +153,7 @@ const AdminImsStatus = () => {
               <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Working…" : "Restart"}
             </button>
             <button
-              onClick={() => refetch()}
+              onClick={() => { refetch(); refetchPool(); }}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition"
             >
               <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} /> Refresh
@@ -215,6 +247,62 @@ const AdminImsStatus = () => {
                 <p className="text-sm text-muted-foreground">No errors recorded ✓</p>
               )}
             </div>
+          </div>
+
+          {/* Pool breakdown by range */}
+          <div className="glass-card border border-white/[0.06] rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Layers className="w-4 h-4 text-neon-magenta" /> Pool by Range
+              <span className="text-xs text-muted-foreground/60 normal-case font-normal">
+                (live count of unassigned numbers per IMS range)
+              </span>
+            </h3>
+            {!poolData || poolData.ranges.length === 0 ? (
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Info className="w-4 h-4" /> No numbers in pool. Click <strong>Scrape Now</strong> or wait for the auto-scrape cycle.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wider text-muted-foreground border-b border-white/[0.06]">
+                      <th className="text-left py-2 font-medium">Range</th>
+                      <th className="text-right py-2 font-medium">Available</th>
+                      <th className="text-right py-2 font-medium">Last Refilled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poolData.ranges.map((r) => (
+                      <tr key={r.name} className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]">
+                        <td className="py-2 font-medium text-foreground">{r.name}</td>
+                        <td className="py-2 text-right">
+                          <span className={cn(
+                            "inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold",
+                            r.count > 50 ? "bg-neon-green/15 text-neon-green" :
+                            r.count > 10 ? "bg-neon-amber/15 text-neon-amber" :
+                            "bg-destructive/15 text-destructive"
+                          )}>
+                            {r.count}
+                          </span>
+                        </td>
+                        <td className="py-2 text-right text-xs text-muted-foreground font-mono">{fmtAgo(r.last_added)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-white/[0.08] text-xs">
+                      <td className="py-2 font-semibold text-muted-foreground uppercase tracking-wider">Total</td>
+                      <td className="py-2 text-right font-mono font-bold text-neon-cyan">
+                        {poolData.ranges.reduce((s, r) => s + r.count, 0)}
+                      </td>
+                      <td className="py-2 text-right text-muted-foreground">
+                        {poolData.totalActive} assigned to agents
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Activity log */}
