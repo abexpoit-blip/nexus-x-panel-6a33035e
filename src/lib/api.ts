@@ -74,6 +74,10 @@ function demoRoute(path: string, opts: RequestInit): any {
   if (path === "/admin/leaderboard") return demoData.leaderboard();
   if (path === "/admin/allocations") return demoData.allocations();
   if (path === "/admin/agents") return demoData.agents();
+  if (path === "/admin/ims-status") return { status: demoImsState.snapshot() };
+  if (path === "/admin/ims-restart" && method === "POST") { demoImsState.restart(); return { ok: true }; }
+  if (path === "/admin/ims-start" && method === "POST") { demoImsState.start(); return { ok: true }; }
+  if (path === "/admin/ims-stop" && method === "POST") { demoImsState.stop(); return { ok: true }; }
 
   if (path === "/rates") return demoData.rates();
   if (path === "/cdr" || path === "/cdr/mine") return demoData.cdr();
@@ -247,5 +251,7 @@ export const api = {
     allocations: () => request<{ allocations: Allocation[] }>("/admin/allocations"),
     imsStatus: () => request<{ status: any }>("/admin/ims-status"),
     imsRestart: () => request<{ ok: boolean }>("/admin/ims-restart", { method: "POST" }),
+    imsStart: () => request<{ ok: boolean }>("/admin/ims-start", { method: "POST" }),
+    imsStop: () => request<{ ok: boolean }>("/admin/ims-stop", { method: "POST" }),
   },
 };
