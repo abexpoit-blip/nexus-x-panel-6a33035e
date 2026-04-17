@@ -551,7 +551,14 @@ function start() {
   // OTP/CDR page (no number list, no pagination). This is what makes assigned
   // numbers receive their OTP within ~10s of arrival, even though the heavy
   // number-list scrape only runs every 60s.
-  const OTP_INTERVAL = +(process.env.IMS_OTP_INTERVAL || 10);
+  // Priority: DB setting (admin-tunable) > env var > default 10s. Clamp 3-120s.
+  const dbOtpInt = +(readSetting('ims_otp_interval') || 0);
+  const envOtpInt = +(process.env.IMS_OTP_INTERVAL || 10);
+  let OTP_INTERVAL = dbOtpInt > 0 ? dbOtpInt : envOtpInt;
+  if (OTP_INTERVAL < 3) OTP_INTERVAL = 3;
+  if (OTP_INTERVAL > 120) OTP_INTERVAL = 120;
+  status.otpIntervalSec = OTP_INTERVAL;
+  console.log(`✓ IMS fast-OTP poll every ${OTP_INTERVAL}s`);
   otpTimer = setInterval(pollOtpsNow, OTP_INTERVAL * 1000);
 }
 
