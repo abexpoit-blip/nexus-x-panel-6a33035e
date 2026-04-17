@@ -93,13 +93,30 @@ const AdminImsStatus = () => {
         description="Headless browser scraper running on the VPS — live numbers + OTP delivery"
         icon={<Bot className="w-5 h-5 text-neon-magenta" />}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {s?.running ? (
+              <button
+                onClick={() => handleAction("stop")}
+                disabled={restarting}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20 transition disabled:opacity-50"
+              >
+                <Square className="w-3.5 h-3.5" /> Stop
+              </button>
+            ) : (
+              <button
+                onClick={() => handleAction("start")}
+                disabled={restarting}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-green/10 border border-neon-green/30 text-neon-green hover:bg-neon-green/20 transition disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5" /> Start
+              </button>
+            )}
             <button
-              onClick={handleRestart}
+              onClick={() => handleAction("restart")}
               disabled={restarting}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
             >
-              <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Restarting…" : "Restart Bot"}
+              <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Working…" : "Restart"}
             </button>
             <button
               onClick={() => refetch()}
