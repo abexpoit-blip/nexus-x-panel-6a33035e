@@ -185,12 +185,7 @@ const AgentGetNumber = () => {
               <span className={cn("truncate", !selectedCountry && "text-muted-foreground")}>
                 {selectedCountry ? selectedCountry.name : "Select country..."}
               </span>
-              <div className="flex items-center gap-2 shrink-0">
-                {selectedCountry?.price_bdt != null && (
-                  <span className="text-xs text-neon-green font-semibold">৳{selectedCountry.price_bdt}</span>
-                )}
-                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", countryOpen && "rotate-180")} />
-              </div>
+              <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", countryOpen && "rotate-180")} />
             </button>
 
             {countryOpen && (
@@ -216,20 +211,17 @@ const AgentGetNumber = () => {
                         key={c.id}
                         onClick={() => { setCountryId(c.id); setCountryOpen(false); setCountrySearch(""); }}
                         className={cn(
-                          "w-full px-3 py-2.5 text-left text-sm flex items-center justify-between gap-2 hover:bg-white/[0.06] transition-colors",
+                          "w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-white/[0.06] transition-colors",
                           countryId === c.id && "bg-primary/10 text-primary"
                         )}
                       >
                         <span className="truncate">{c.name}</span>
-                        {c.price_bdt != null && (
-                          <span className="text-xs text-neon-green font-semibold shrink-0">৳{c.price_bdt}</span>
-                        )}
                       </button>
                     ))
                   )}
                 </div>
                 <div className="px-3 py-2 text-[10px] text-muted-foreground border-t border-white/[0.06] bg-white/[0.02]">
-                  {filteredCountries.length} of {countries.length} countries · prices in BDT
+                  {filteredCountries.length} of {countries.length} countries
                 </div>
               </div>
             )}
@@ -246,9 +238,7 @@ const AgentGetNumber = () => {
             >
               <option value="" className="bg-card">Select operator</option>
               {operators.map((o) => (
-                <option key={o.id} value={o.id} className="bg-card">
-                  {o.name}{o.price_bdt != null ? ` — ৳${o.price_bdt}` : ""}
-                </option>
+                <option key={o.id} value={o.id} className="bg-card">{o.name}</option>
               ))}
             </select>
           </div>
