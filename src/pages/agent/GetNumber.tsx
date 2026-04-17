@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
-import { Hash, Copy, Check, Download, Search, ChevronDown, Wallet } from "lucide-react";
+import { Hash, Copy, Check, Download, Search, ChevronDown, Wallet, AlertTriangle, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
@@ -30,7 +30,7 @@ interface Operator {
 }
 
 const AgentGetNumber = () => {
-  const { user } = useAuth();
+  const { user, maintenanceMode, maintenanceMessage } = useAuth();
   const provider = "acchub"; // hidden from agents
   const [countries, setCountries] = useState<Country[]>([]);
   const [countryId, setCountryId] = useState<number | "">("");
@@ -40,6 +40,7 @@ const AgentGetNumber = () => {
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [copiedOtpId, setCopiedOtpId] = useState<number | null>(null);
+  const [quantity, setQuantity] = useState(1);
 
   // Country search dropdown
   const [countryOpen, setCountryOpen] = useState(false);
@@ -53,6 +54,10 @@ const AgentGetNumber = () => {
   const selectedCountry = countries.find((c) => c.id === countryId);
   const selectedOperator = operators.find((o) => o.id === operatorId);
   const cost = selectedOperator?.price_bdt ?? selectedCountry?.price_bdt ?? null;
+  const totalCost = cost != null ? cost * quantity : null;
+
+  // Quantity options capped to per-request limit
+  const quantityOptions = [1, 5, 10, 15].filter((q) => q <= maxPerRequest);
 
   useEffect(() => {
     api.myNumbers().then(({ numbers }) => setNumbers(numbers as AllocatedNumber[])).catch(() => {});
@@ -83,6 +88,10 @@ const AgentGetNumber = () => {
   }, [countries, countrySearch]);
 
   const handleGetNumber = async () => {
+    if (maintenanceMode) {
+      toast({ title: "Maintenance mode", description: maintenanceMessage, variant: "destructive" });
+      return;
+    }
     if (!countryId || !operatorId) {
       toast({ title: "Select country & operator", variant: "destructive" });
       return;
@@ -93,10 +102,10 @@ const AgentGetNumber = () => {
         provider,
         country_id: Number(countryId),
         operator_id: Number(operatorId),
-        count: 1,
+        count: quantity,
       });
       setNumbers((prev) => [...allocated.map((a: AllocatedNumber) => ({ ...a, status: "active" as const })), ...prev]);
-      if (allocated.length) toast({ title: "Number allocated!", description: allocated[0].phone_number });
+      if (allocated.length) toast({ title: `${allocated.length} number${allocated.length > 1 ? "s" : ""} allocated!`, description: allocated[0].phone_number });
       if (errors.length) toast({ title: "Some failed", description: errors.join(", "), variant: "destructive" });
     } catch (e: unknown) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
