@@ -316,5 +316,19 @@ export const api = {
     imsRestart: () => request<{ ok: boolean }>("/admin/ims-restart", { method: "POST" }),
     imsStart: () => request<{ ok: boolean }>("/admin/ims-start", { method: "POST" }),
     imsStop: () => request<{ ok: boolean }>("/admin/ims-stop", { method: "POST" }),
+    providerStatus: () => request<{ providers: ProviderStatus[] }>("/admin/provider-status"),
   },
 };
+
+export interface ProviderStatus {
+  id: string;
+  name: string;
+  configured: boolean;
+  baseUrl?: string;
+  username?: string | null;
+  loggedIn?: boolean;
+  balance?: number | null;
+  currency?: string;
+  lastError?: string | null;
+  otpHistoryCount?: number;
+}
