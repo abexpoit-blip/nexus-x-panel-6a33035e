@@ -110,6 +110,29 @@ router.get('/allocations', (req, res) => {
   res.json({ allocations });
 });
 
+// GET /api/admin/commission-trend — daily commission credited to agents
+router.get('/commission-trend', (req, res) => {
+  const days = Math.min(Math.max(+req.query.days || 14, 1), 60);
+  const now = new Date();
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const start = Math.floor(d.getTime() / 1000);
+    const end = start + 86400;
+    const row = db.prepare(
+      "SELECT COALESCE(SUM(amount_bdt),0) s, COUNT(*) c FROM payments WHERE type = 'credit' AND created_at >= ? AND created_at < ?"
+    ).get(start, end);
+    series.push({
+      label: d.toISOString().slice(5, 10),
+      value: Math.round(row.s * 100) / 100,
+      count: row.c,
+    });
+  }
+  res.json({ series });
+});
+
 // GET /api/admin/ims-status — live IMS bot status
 router.get('/ims-status', (req, res) => {
   try {

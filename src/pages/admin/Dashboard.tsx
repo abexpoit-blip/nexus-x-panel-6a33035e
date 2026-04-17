@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Users, UserCheck, Hash, Activity, MessageSquare, TrendingUp, Wallet, Trophy, Globe, Zap, Server, ShieldCheck, Coins, Clock } from "lucide-react";
-import { RevenueArea, OtpLine, TopAgentsBar, CountryPie, SuccessGauge } from "@/components/charts/Charts";
+import { RevenueArea, OtpLine, TopAgentsBar, CountryPie, SuccessGauge, CommissionArea } from "@/components/charts/Charts";
 import { useMemo } from "react";
 import { GradientMesh, PageHeader, PremiumKpiCard, PremiumChartCard } from "@/components/premium";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ const AdminDashboard = () => {
   const { data } = useQuery({ queryKey: ["admin-stats"], queryFn: () => api.admin.stats(), refetchInterval: 15000 });
   const { data: lb } = useQuery({ queryKey: ["leaderboard"], queryFn: () => api.admin.leaderboard() });
   const { data: alloc } = useQuery({ queryKey: ["admin-allocations"], queryFn: () => api.admin.allocations(), refetchInterval: 30000 });
+  const { data: commTrend } = useQuery({ queryKey: ["commission-trend"], queryFn: () => api.admin.commissionTrend(14), refetchInterval: 60000 });
 
   const s = data || {
     totalAgents: 0, activeAgents: 0, totalAlloc: 0, activeAlloc: 0,
@@ -182,6 +183,31 @@ const AdminDashboard = () => {
           )}
         </PremiumChartCard>
       </div>
+
+      {/* Commission Trend — daily commission credited to agents */}
+      <PremiumChartCard
+        title="Commission Paid to Agents"
+        description="Last 14 days · BDT credited per successful OTP"
+        variant="highlighted"
+        legend={[{ label: "Daily commission", color: "hsl(300 100% 55%)" }]}
+        actions={
+          <Badge variant="outline" className="glass-strong gap-1.5 border-neon-magenta/30 text-neon-magenta">
+            <Coins className="w-3 h-3" />
+            <span className="text-[10px] uppercase tracking-wider">
+              Today: ৳{(s.todayCommission ?? 0).toLocaleString()}
+            </span>
+          </Badge>
+        }
+      >
+        {(commTrend?.series?.length ?? 0) === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <Coins className="w-10 h-10 text-muted-foreground/30 mb-2" />
+            <p className="text-xs text-muted-foreground">No commission data yet</p>
+          </div>
+        ) : (
+          <CommissionArea data={commTrend!.series.map(p => ({ label: p.label, value: p.value }))} height={260} />
+        )}
+      </PremiumChartCard>
 
       {/* Top agents leaderboard */}
       <PremiumChartCard
