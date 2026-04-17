@@ -4,6 +4,22 @@ const { authRequired, adminOnly } = require('../middleware/auth');
 const { logFromReq } = require('../lib/audit');
 
 const router = express.Router();
+
+// PUBLIC settings (no auth) — exposes safe flags like signup_enabled, maintenance_mode
+router.get('/settings/public', (req, res) => {
+  const keys = ['signup_enabled', 'maintenance_mode', 'maintenance_message'];
+  const out = {};
+  for (const k of keys) {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(k);
+    out[k] = row ? row.value : null;
+  }
+  res.json({
+    signup_enabled: out.signup_enabled === 'true',
+    maintenance_mode: out.maintenance_mode === 'true',
+    maintenance_message: out.maintenance_message || '',
+  });
+});
+
 router.use(authRequired, adminOnly);
 
 // GET /api/audit?limit=200

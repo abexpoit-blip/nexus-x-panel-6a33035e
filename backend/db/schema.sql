@@ -137,3 +137,5 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES ('signup_enabled', 'true');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_mode', 'false');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_message', 'System is under maintenance. Please try again later.');
