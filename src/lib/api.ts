@@ -361,6 +361,13 @@ export const api = {
     imsRestart: () => request<{ ok: boolean }>("/admin/ims-restart", { method: "POST" }),
     imsStart: () => request<{ ok: boolean }>("/admin/ims-start", { method: "POST" }),
     imsStop: () => request<{ ok: boolean }>("/admin/ims-stop", { method: "POST" }),
+    imsCredentials: () => request<{
+      enabled: boolean; base_url: string; username: string;
+      password_masked: string; has_password: boolean;
+      source: { username: string; password: string };
+    }>("/admin/ims-credentials"),
+    imsCredentialsSave: (body: { username?: string; password?: string; base_url?: string; enabled?: boolean }) =>
+      request<{ ok: boolean }>("/admin/ims-credentials", { method: "PUT", body: JSON.stringify(body) }),
     providerStatus: () => request<{ providers: ProviderStatus[] }>("/admin/provider-status"),
   },
 };
