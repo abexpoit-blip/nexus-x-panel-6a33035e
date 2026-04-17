@@ -53,6 +53,7 @@ let consecFail = 0;
 let loggedIn = false;
 let emptyStreak = 0;        // consecutive scrapes returning 0 numbers
 let scrapeTimer = null;     // for graceful stop
+let otpTimer = null;        // fast OTP-only poll loop
 const EMPTY_LIMIT = +(process.env.IMS_EMPTY_LIMIT || 10);
 let lastLowPoolAlertAt = 0;   // unix seconds — debounce low-pool notifications
 
@@ -539,15 +540,38 @@ function start() {
     return;
   }
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
+  if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
   status.running = true;
   emptyStreak = 0;
   console.log(`✓ IMS bot starting (every ${INTERVAL}s, headless=${HEADLESS}, base=${BASE_URL})`);
   setTimeout(tick, 5000);
   scrapeTimer = setInterval(tick, INTERVAL * 1000);
+
+  // FAST OTP loop — every OTP_INTERVAL seconds (default 10s) we ONLY scrape the
+  // OTP/CDR page (no number list, no pagination). This is what makes assigned
+  // numbers receive their OTP within ~10s of arrival, even though the heavy
+  // number-list scrape only runs every 60s.
+  const OTP_INTERVAL = +(process.env.IMS_OTP_INTERVAL || 10);
+  otpTimer = setInterval(pollOtpsNow, OTP_INTERVAL * 1000);
+}
+
+// Lightweight OTP-only poll — runs frequently between heavy ticks.
+// Skips entirely if a heavy tick is in progress (which already delivers OTPs).
+async function pollOtpsNow() {
+  if (busy || !loggedIn || !page) return;
+  busy = true;
+  try {
+    await deliverOtps();
+  } catch (e) {
+    dwarn('[ims-bot] otp-poll:', e.message);
+  } finally {
+    busy = false;
+  }
 }
 
 async function stop() {
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
+  if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
   try { await browser?.close(); } catch (_) {}
   browser = null; page = null; loggedIn = false;
   status.running = false;
