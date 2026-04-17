@@ -250,91 +250,183 @@ const AgentGetNumber = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_auto] gap-4 items-end">
-          {/* Country searchable combobox */}
-          <div className="space-y-2 relative" ref={countryRef}>
-            <label className="text-sm font-medium text-muted-foreground">Country</label>
-            <button
-              type="button"
-              onClick={() => setCountryOpen((v) => !v)}
-              className="w-full h-11 rounded-lg bg-white/[0.04] border border-white/[0.1] px-3 text-sm text-foreground focus:outline-none focus:border-primary/50 flex items-center justify-between gap-2"
-            >
-              <span className={cn("truncate", !selectedCountry && "text-muted-foreground")}>
-                {selectedCountry ? selectedCountry.name : "Select country..."}
-              </span>
-              <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", countryOpen && "rotate-180")} />
-            </button>
+        {provider === "ims" ? (
+          /* ============ Server B (IMS): single Range dropdown ============ */
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
+            <div className="space-y-2 relative" ref={rangeRef}>
+              <label className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+                <span>Range</span>
+                <span className="text-[10px] text-muted-foreground/70 font-normal">
+                  {ranges.length} ranges · <span className="text-neon-green font-semibold">{totalPoolSize}</span> numbers in pool
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setRangeOpen((v) => !v)}
+                className="w-full h-11 rounded-lg bg-white/[0.04] border border-white/[0.1] px-3 text-sm text-foreground focus:outline-none focus:border-primary/50 flex items-center justify-between gap-2"
+              >
+                <span className={cn("truncate", !selectedRange && "text-muted-foreground")}>
+                  {selectedRange ? (
+                    <>
+                      {selectedRange.name}
+                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-neon-green/15 text-neon-green font-semibold">
+                        {selectedRange.count} avail
+                      </span>
+                    </>
+                  ) : ranges.length === 0 ? "No ranges available — wait for refill" : "Select a range..."}
+                </span>
+                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", rangeOpen && "rotate-180")} />
+              </button>
 
-            {countryOpen && (
-              <div className="absolute z-50 mt-1 w-full rounded-lg bg-card/95 backdrop-blur-xl border border-white/[0.1] shadow-2xl overflow-hidden">
-                <div className="p-2 border-b border-white/[0.06] sticky top-0 bg-card/95">
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      autoFocus
-                      value={countrySearch}
-                      onChange={(e) => setCountrySearch(e.target.value)}
-                      placeholder="Search country or code (+91, +234...)"
-                      className="w-full h-9 pl-9 pr-3 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
-                    />
+              {rangeOpen && (
+                <div className="absolute z-50 mt-1 w-full rounded-lg bg-card/95 backdrop-blur-xl border border-white/[0.1] shadow-2xl overflow-hidden">
+                  <div className="p-2 border-b border-white/[0.06] sticky top-0 bg-card/95">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        value={rangeSearch}
+                        onChange={(e) => setRangeSearch(e.target.value)}
+                        placeholder="Search range (Peru, Bitel, TF04...)"
+                        className="w-full h-9 pl-9 pr-3 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto scrollbar-none">
+                    {filteredRanges.length === 0 ? (
+                      <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                        {ranges.length === 0 ? "Pool is empty — admin needs to refill" : `No ranges match "${rangeSearch}"`}
+                      </div>
+                    ) : (
+                      filteredRanges.map((r) => (
+                        <button
+                          key={r.name}
+                          onClick={() => { setRangeName(r.name); setRangeOpen(false); setRangeSearch(""); }}
+                          className={cn(
+                            "w-full px-3 py-2.5 text-left text-sm flex items-center justify-between gap-2 hover:bg-white/[0.06] transition-colors",
+                            rangeName === r.name && "bg-primary/10 text-primary"
+                          )}
+                        >
+                          <span className="truncate">{r.name}</span>
+                          <span className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold shrink-0",
+                            r.count > 50 ? "bg-neon-green/15 text-neon-green" :
+                            r.count > 10 ? "bg-neon-amber/15 text-neon-amber" :
+                            "bg-destructive/15 text-destructive"
+                          )}>
+                            {r.count}
+                          </span>
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
-                <div className="max-h-72 overflow-y-auto scrollbar-none">
-                  {filteredCountries.length === 0 ? (
-                    <div className="px-3 py-6 text-center text-xs text-muted-foreground">No countries match "{countrySearch}"</div>
-                  ) : (
-                    filteredCountries.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => { setCountryId(c.id); setCountryOpen(false); setCountrySearch(""); }}
-                        className={cn(
-                          "w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-white/[0.06] transition-colors",
-                          countryId === c.id && "bg-primary/10 text-primary"
-                        )}
-                      >
-                        <span className="truncate">{c.name}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-                <div className="px-3 py-2 text-[10px] text-muted-foreground border-t border-white/[0.06] bg-white/[0.02]">
-                  {filteredCountries.length} of {countries.length} countries
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {/* Operator */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">Operator</label>
-            <select
-              value={operatorId}
-              onChange={(e) => setOperatorId(e.target.value ? Number(e.target.value) : "")}
-              disabled={!countryId}
-              className="w-full h-11 rounded-lg bg-white/[0.04] border border-white/[0.1] px-3 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50"
+            <Button
+              onClick={handleGetNumber}
+              disabled={loading || maintenanceMode || usedToday >= dailyLimit || !rangeName}
+              className="h-11 bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground font-semibold hover:opacity-90 border-0 min-w-[180px]"
             >
-              <option value="" className="bg-card">Select operator</option>
-              {operators.map((o) => (
-                <option key={o.id} value={o.id} className="bg-card">{o.name}</option>
-              ))}
-            </select>
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Hash className="w-4 h-4 mr-2" />
+                  Get {quantity > 1 ? `${quantity} Numbers` : "Number"}
+                </>
+              )}
+            </Button>
           </div>
+        ) : (
+          /* ============ Server A (AccHub): Country + Operator ============ */
+          <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_auto] gap-4 items-end">
+            {/* Country searchable combobox */}
+            <div className="space-y-2 relative" ref={countryRef}>
+              <label className="text-sm font-medium text-muted-foreground">Country</label>
+              <button
+                type="button"
+                onClick={() => setCountryOpen((v) => !v)}
+                className="w-full h-11 rounded-lg bg-white/[0.04] border border-white/[0.1] px-3 text-sm text-foreground focus:outline-none focus:border-primary/50 flex items-center justify-between gap-2"
+              >
+                <span className={cn("truncate", !selectedCountry && "text-muted-foreground")}>
+                  {selectedCountry ? selectedCountry.name : "Select country..."}
+                </span>
+                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", countryOpen && "rotate-180")} />
+              </button>
 
-          <Button
-            onClick={handleGetNumber}
-            disabled={loading || maintenanceMode || usedToday >= dailyLimit || !operatorId}
-            className="h-11 bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground font-semibold hover:opacity-90 border-0 min-w-[180px]"
-          >
-            {loading ? (
-              <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-            ) : (
-              <>
-                <Hash className="w-4 h-4 mr-2" />
-                Get {quantity > 1 ? `${quantity} Numbers` : "Number"}
-              </>
-            )}
-          </Button>
-        </div>
+              {countryOpen && (
+                <div className="absolute z-50 mt-1 w-full rounded-lg bg-card/95 backdrop-blur-xl border border-white/[0.1] shadow-2xl overflow-hidden">
+                  <div className="p-2 border-b border-white/[0.06] sticky top-0 bg-card/95">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        value={countrySearch}
+                        onChange={(e) => setCountrySearch(e.target.value)}
+                        placeholder="Search country or code (+91, +234...)"
+                        className="w-full h-9 pl-9 pr-3 rounded-md bg-white/[0.04] border border-white/[0.08] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto scrollbar-none">
+                    {filteredCountries.length === 0 ? (
+                      <div className="px-3 py-6 text-center text-xs text-muted-foreground">No countries match "{countrySearch}"</div>
+                    ) : (
+                      filteredCountries.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => { setCountryId(c.id); setCountryOpen(false); setCountrySearch(""); }}
+                          className={cn(
+                            "w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-white/[0.06] transition-colors",
+                            countryId === c.id && "bg-primary/10 text-primary"
+                          )}
+                        >
+                          <span className="truncate">{c.name}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <div className="px-3 py-2 text-[10px] text-muted-foreground border-t border-white/[0.06] bg-white/[0.02]">
+                    {filteredCountries.length} of {countries.length} countries
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Operator */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Operator</label>
+              <select
+                value={operatorId}
+                onChange={(e) => setOperatorId(e.target.value ? Number(e.target.value) : "")}
+                disabled={!countryId}
+                className="w-full h-11 rounded-lg bg-white/[0.04] border border-white/[0.1] px-3 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50"
+              >
+                <option value="" className="bg-card">Select operator</option>
+                {operators.map((o) => (
+                  <option key={o.id} value={o.id} className="bg-card">{o.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <Button
+              onClick={handleGetNumber}
+              disabled={loading || maintenanceMode || usedToday >= dailyLimit || !operatorId}
+              className="h-11 bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground font-semibold hover:opacity-90 border-0 min-w-[180px]"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Hash className="w-4 h-4 mr-2" />
+                  Get {quantity > 1 ? `${quantity} Numbers` : "Number"}
+                </>
+              )}
+            </Button>
+          </div>
+        )}
 
         {/* Bulk quantity selector */}
         {quantityOptions.length > 1 && (
