@@ -119,25 +119,47 @@ backend/
 
 ## 🔌 Provider integration
 
-### AccHub (auto)
-Edit `providers/acchub.js` → endpoints are placeholders. Verify against AccHub API docs and update.
-Set `ACCHUB_API_KEY` in `.env`.
+### AccHub (auto, fully wired)
+Reverse-engineered from `sms.acchub.io`. The provider client logs in with your account
+credentials, caches the JWT, and:
+- Lists countries: `GET /api/freelancer/get-page/available-countries`
+- Lists operators: `GET /api/freelancer/get-page/available-operators?country_id=X`
+- Allocates numbers: `POST /api/freelancer/get-page/get-number`
+- Polls OTPs: `GET /api/freelancer/get-page/otp-history` (every 5s) and matches by phone number
 
-### IMS (manual mode)
-Since you don't have an IMS API account, IMS works via **manual pool**:
+Set in `.env`:
+```
+ACCHUB_USERNAME=ShovonYE
+ACCHUB_PASSWORD=your_acchub_password
+```
 
-1. Manager gives you a number → you POST it to `/api/numbers/ims/pool`:
-   ```json
-   { "numbers": ["+88017xxxxxxx"], "country_code": "BD", "operator": "Grameen" }
-   ```
-2. Agent calls `/api/numbers/get` with `provider: "ims"` → number is assigned from pool.
-3. When OTP arrives, you POST to `/api/numbers/ims/otp`:
-   ```json
-   { "phone_number": "+88017xxxxxxx", "otp": "1234" }
-   ```
-4. Backend auto-credits the agent based on Rate Card commission %.
+### IMS (Puppeteer browser bot)
+The manager's IMS account has no API, so we run a headless Chromium that stays logged
+into `imssms.org` and scrapes:
+1. **Numbers page** → when manager adds a new number, bot inserts it into the local pool. Agents claim it via `POST /api/numbers/get` with `provider:"ims"`.
+2. **Inbox page** → when an OTP arrives, bot matches it to the active allocation by phone number and auto-credits the agent.
 
-(You can build admin UI pages in the frontend that call these endpoints — easier than curl.)
+Set in `.env`:
+```
+IMS_ENABLED=true
+IMS_USERNAME=Shovonkhan7
+IMS_PASSWORD=your_ims_password
+IMS_CHROME_PATH=/usr/bin/chromium-browser   # or leave blank to use puppeteer's bundled chrome
+```
+
+**⚠ One-time selector tuning required.** The IMS panel URLs (`/login`, `/numbers`, `/inbox`)
+and table heuristics in `workers/imsBot.js` are best-guess defaults. After first deploy,
+run inspector mode to dump the real HTML and tune them:
+
+```bash
+IMS_HEADLESS=false node workers/imsBot.js --inspect
+# Manually open the numbers + inbox pages, then Ctrl+C → saves ims-page.html
+```
+
+Live bot logs: `pm2 logs nexus-api | grep ims-bot`
+
+The legacy manual endpoints (`POST /api/numbers/ims/pool` and `POST /api/numbers/ims/otp`)
+remain available as a fallback if the bot is disabled.
 
 ---
 
