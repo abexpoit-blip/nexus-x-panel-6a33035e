@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/StatCard";
 import {
   Shield, UserX, UserCheck, AlertTriangle, Eye, UserPlus, Power,
-  ScrollText, Monitor, LogOut, Smartphone, Globe, Search,
+  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -33,9 +34,10 @@ const parseUA = (ua: string) => {
 
 const AdminSecurity = () => {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"audit" | "sessions" | "settings">("audit");
+  const [tab, setTab] = useState<"audit" | "sessions" | "settings" | "maintenance">("audit");
   const [auditSearch, setAuditSearch] = useState("");
-  const { signupEnabled, setSignupEnabled } = useAuth();
+  const { signupEnabled, setSignupEnabled, maintenanceMode, maintenanceMessage, setMaintenanceMode } = useAuth();
+  const [draftMsg, setDraftMsg] = useState(maintenanceMessage);
 
   const { data: auditData, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-logs"], queryFn: () => api.audit.list({ limit: 200 }), refetchInterval: 30000,
@@ -67,6 +69,7 @@ const AdminSecurity = () => {
     { key: "audit" as const, label: "Audit Log", icon: ScrollText, count: logs.length },
     { key: "sessions" as const, label: "Active Sessions", icon: Monitor, count: sessions.length },
     { key: "settings" as const, label: "Registration", icon: UserPlus },
+    { key: "maintenance" as const, label: "Maintenance", icon: Wrench },
   ];
 
   return (
