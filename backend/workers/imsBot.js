@@ -74,6 +74,7 @@ const status = {
   consecFail: 0,
   baseUrl: '',
   intervalSec: 0,
+  otpIntervalSec: 0,
 };
 
 // Ring buffer of recent scrape activity (last 20 events)
