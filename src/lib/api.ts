@@ -333,6 +333,8 @@ export const api = {
     createAgent: (body: any) => request<{ id: number }>("/admin/agents", { method: "POST", body: JSON.stringify(body) }),
     updateAgent: (id: number, body: any) => request(`/admin/agents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteAgent: (id: number) => request(`/admin/agents/${id}`, { method: "DELETE" }),
+    approveAgent: (id: number) => request(`/admin/agents/${id}/approve`, { method: "POST" }),
+    rejectAgent: (id: number) => request(`/admin/agents/${id}/reject`, { method: "POST" }),
     loginAs: (id: number) =>
       request<{ token: string; user: any; impersonator: { id: number; username: string } }>(
         `/admin/login-as/${id}`, { method: "POST" }
