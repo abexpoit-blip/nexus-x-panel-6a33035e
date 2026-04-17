@@ -64,9 +64,19 @@ const AdminSecurity = () => {
     toast.success(signupEnabled ? "Registration disabled" : "Registration enabled");
   };
 
-  const logs = (auditData?.logs || []).filter((l) =>
-    !auditSearch || `${l.action} ${l.username || ""} ${l.target_type || ""}`.toLowerCase().includes(auditSearch.toLowerCase())
-  );
+  const categoryMatcher: Record<typeof auditCategory, (action: string) => boolean> = {
+    all: () => true,
+    pool_cleanup: (a) => /pool_cleanup|cleanup/i.test(a),
+    ims_bot: (a) => /^ims_/i.test(a),
+    auth: (a) => /login|logout|register|impersonation|session/i.test(a),
+    agents: (a) => /agent_|topup|withdraw|credit/i.test(a),
+    settings: (a) => /setting|credentials_updated/i.test(a),
+  };
+  const logs = (auditData?.logs || [])
+    .filter((l) => categoryMatcher[auditCategory](l.action))
+    .filter((l) =>
+      !auditSearch || `${l.action} ${l.username || ""} ${l.target_type || ""} ${l.meta || ""}`.toLowerCase().includes(auditSearch.toLowerCase())
+    );
   const sessions = sessData?.sessions || [];
 
   const impersonations = impData?.impersonations || [];
