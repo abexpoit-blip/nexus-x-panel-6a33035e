@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../lib/db');
 const {
   signToken, recordSession, authRequired, hashToken,
-  setAuthCookie, clearAuthCookie,
+  setAuthCookie, clearAuthCookie, signImpersonationToken,
 } = require('../middleware/auth');
 const { log, logFromReq } = require('../lib/audit');
 
@@ -94,6 +94,24 @@ router.post('/logout', authRequired, (req, res) => {
   clearAuthCookie(res);
   logFromReq(req, 'logout');
   res.json({ ok: true });
+});
+
+// POST /api/auth/exit-impersonation — restore original admin
+router.post('/exit-impersonation', authRequired, (req, res) => {
+  if (!req.impersonator) return res.status(400).json({ error: 'Not impersonating' });
+  const admin = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'admin'").get(req.impersonator.id);
+  if (!admin) return res.status(404).json({ error: 'Original admin not found' });
+
+  const token = signToken(admin);
+  recordSession(admin.id, token, req);
+  setAuthCookie(res, token);
+
+  logFromReq(req, 'impersonation_end', {
+    targetType: 'user', targetId: req.user.id, meta: { agent: req.user.username },
+  });
+
+  const { password_hash, ...safe } = admin;
+  res.json({ token, user: safe });
 });
 
 module.exports = router;
