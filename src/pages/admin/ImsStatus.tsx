@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info, Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -66,15 +66,19 @@ const AdminImsStatus = () => {
   });
   const s = data?.status as ImsStatus | undefined;
 
-  const handleRestart = async () => {
-    if (!confirm("Restart the IMS bot? Current scrape will be interrupted.")) return;
+  const handleAction = async (action: "restart" | "start" | "stop") => {
+    const labels = { restart: "Restart", start: "Start", stop: "Stop" };
+    if (action === "stop" && !confirm("Stop the IMS bot? It will stop scraping until restarted.")) return;
+    if (action === "restart" && !confirm("Restart the IMS bot? Current scrape will be interrupted.")) return;
     setRestarting(true);
     try {
-      await api.admin.imsRestart();
-      toast.success("Bot restart initiated");
-      setTimeout(() => refetch(), 2000);
+      if (action === "restart") await api.admin.imsRestart();
+      else if (action === "start") await api.admin.imsStart();
+      else await api.admin.imsStop();
+      toast.success(`${labels[action]} initiated`);
+      setTimeout(() => refetch(), 1500);
     } catch (e) {
-      toast.error("Restart failed: " + (e as Error).message);
+      toast.error(`${labels[action]} failed: ` + (e as Error).message);
     } finally {
       setRestarting(false);
     }
