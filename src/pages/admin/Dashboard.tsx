@@ -17,6 +17,7 @@ const AdminDashboard = () => {
   const s = data || {
     totalAgents: 0, activeAgents: 0, totalAlloc: 0, activeAlloc: 0,
     totalOtp: 0, todayOtp: 0, todayRevenue: 0, totalRevenue: 0,
+    todayCommission: 0, totalCommission: 0, pendingWithdrawals: 0,
   };
 
   const { revenueSeries, otpSeries, countrySeries, successRate } = useMemo(() => {
