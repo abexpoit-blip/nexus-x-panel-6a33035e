@@ -10,7 +10,7 @@ import { Wallet, ArrowDownToLine, Send } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const MIN_WITHDRAW = 500;
+const DEFAULT_POLICY = { min_amount: 500, fee_percent: 2, sla_hours: 24 };
 
 const statusBadge = (s: string) => cn(
   "px-2 py-0.5 rounded text-xs font-semibold uppercase",
@@ -32,6 +32,9 @@ const AgentPayments = () => {
 
   const { data: payData, isLoading } = useQuery({ queryKey: ["my-payments"], queryFn: () => api.payments.mine() });
   const { data: wdData } = useQuery({ queryKey: ["my-withdrawals"], queryFn: () => api.withdrawals.mine(), refetchInterval: 30000 });
+  const { data: policyData } = useQuery({ queryKey: ["wd-policy"], queryFn: () => api.withdrawals.policy() });
+  const policy = policyData ?? DEFAULT_POLICY;
+  const hasPending = (wdData?.withdrawals || []).some((w) => w.status === "pending");
 
   const submit = useMutation({
     mutationFn: () => api.withdrawals.request({
@@ -40,16 +43,18 @@ const AgentPayments = () => {
       account_number: accountNumber,
       note: note || undefined,
     }),
-    onSuccess: () => {
-      toast.success("Withdrawal request submitted — pending admin approval");
+    onSuccess: (r) => {
+      toast.success(`Request submitted — fee ৳${r.fee.toFixed(2)}, you'll receive ৳${r.net.toFixed(2)} within ${policy.sla_hours}h`);
       setAmount(""); setAccountName(""); setAccountNumber(""); setNote("");
       qc.invalidateQueries({ queryKey: ["my-withdrawals"] });
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const amt = Number(amount);
-  const valid = amt >= MIN_WITHDRAW && amt <= balance && accountNumber.trim().length > 0;
+  const fee = amt > 0 ? +(amt * policy.fee_percent / 100).toFixed(2) : 0;
+  const net = +(amt - fee).toFixed(2);
+  const valid = !hasPending && amt >= policy.min_amount && amt <= balance && accountNumber.trim().length > 0;
 
   return (
     <div className="space-y-6">
@@ -64,7 +69,8 @@ const AgentPayments = () => {
         <GlassCard glow="cyan" className="lg:col-span-1">
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Available Balance</p>
           <p className="text-4xl font-display font-bold text-neon-cyan mt-2">৳{balance.toFixed(2)}</p>
-          <p className="text-xs text-muted-foreground mt-3">Min. withdrawal: ৳{MIN_WITHDRAW}</p>
+          <p className="text-xs text-muted-foreground mt-3">Min. withdrawal: ৳{policy.min_amount}</p>
+          <p className="text-xs text-muted-foreground">Service fee: {policy.fee_percent}% • SLA: {policy.sla_hours}h</p>
         </GlassCard>
 
         <GlassCard glow="magenta" className="lg:col-span-2">
@@ -74,8 +80,8 @@ const AgentPayments = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Amount (৳)</label>
-              <Input type="number" step="1" min={MIN_WITHDRAW} max={balance}
-                value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`min ${MIN_WITHDRAW}`} />
+              <Input type="number" step="1" min={policy.min_amount} max={balance}
+                value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`min ${policy.min_amount}`} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Method</label>
@@ -103,10 +109,18 @@ const AgentPayments = () => {
               <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything we should know…" />
             </div>
           </div>
+          {amt > 0 && (
+            <div className="mt-4 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3 grid grid-cols-3 gap-3 text-center">
+              <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Request</p><p className="text-sm font-mono font-bold text-foreground">৳{amt.toFixed(2)}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Fee ({policy.fee_percent}%)</p><p className="text-sm font-mono font-bold text-neon-amber">−৳{fee.toFixed(2)}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">You receive</p><p className="text-sm font-mono font-bold text-neon-green">৳{net.toFixed(2)}</p></div>
+            </div>
+          )}
           <div className="flex items-center justify-between mt-4">
             <p className="text-xs text-muted-foreground">
-              {amt > 0 && amt < MIN_WITHDRAW && <span className="text-destructive">Amount must be ≥ ৳{MIN_WITHDRAW}</span>}
-              {amt > balance && <span className="text-destructive">Exceeds available balance</span>}
+              {hasPending && <span className="text-neon-amber">⏳ You have a pending request — wait for admin to process it.</span>}
+              {!hasPending && amt > 0 && amt < policy.min_amount && <span className="text-destructive">Amount must be ≥ ৳{policy.min_amount}</span>}
+              {!hasPending && amt > balance && <span className="text-destructive">Exceeds available balance</span>}
             </p>
             <Button onClick={() => submit.mutate()} disabled={!valid || submit.isPending}
               className="bg-gradient-to-r from-neon-magenta to-primary text-primary-foreground">
