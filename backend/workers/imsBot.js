@@ -32,6 +32,9 @@ let page = null;
 let busy = false;
 let consecFail = 0;
 let loggedIn = false;
+let emptyStreak = 0;        // consecutive scrapes returning 0 numbers
+let scrapeTimer = null;     // for graceful stop
+const EMPTY_LIMIT = +(process.env.IMS_EMPTY_LIMIT || 10);
 
 // Live status (read by /api/admin/ims-status)
 const status = {
@@ -64,9 +67,9 @@ function getStatus() {
     const poolSize = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='pool'").get().c;
     const activeAssigned = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='active'").get().c;
     const otpReceived = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='received'").get().c;
-    return { ...status, poolSize, activeAssigned, otpReceived, events: events.slice() };
+    return { ...status, poolSize, activeAssigned, otpReceived, emptyStreak, emptyLimit: EMPTY_LIMIT, events: events.slice() };
   } catch (_) {
-    return { ...status, poolSize: 0, activeAssigned: 0, otpReceived: 0, events: events.slice() };
+    return { ...status, poolSize: 0, activeAssigned: 0, otpReceived: 0, emptyStreak, emptyLimit: EMPTY_LIMIT, events: events.slice() };
   }
 }
 
@@ -281,6 +284,22 @@ async function tick() {
         console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
         logEvent('success', `Pool +${added} new numbers`, { scraped: nums.length });
       }
+
+      // Auto-pause: track consecutive empty scrapes
+      if (nums.length === 0) {
+        emptyStreak++;
+        if (emptyStreak >= EMPTY_LIMIT) {
+          const msg = `IMS bot auto-paused: ${EMPTY_LIMIT} consecutive empty scrapes`;
+          console.warn(`[ims-bot] ${msg}`);
+          logEvent('warn', msg);
+          notifyAdmins('IMS Bot Auto-Paused', `No numbers found in last ${EMPTY_LIMIT} scrapes. Bot stopped to save resources. Click Start when IMS has stock.`, 'warning');
+          await stop();
+          emptyStreak = 0;
+          return;
+        }
+      } else {
+        emptyStreak = 0;
+      }
     }
 
     // 2) OTPs → match active allocations & credit
@@ -325,6 +344,17 @@ async function tick() {
   }
 }
 
+// Notify all admins (broadcast-style — one row per admin user)
+function notifyAdmins(title, message, type = 'warning') {
+  try {
+    const admins = db.prepare("SELECT id FROM users WHERE role='admin'").all();
+    const ins = db.prepare("INSERT INTO notifications (user_id, title, message, type) VALUES (?, ?, ?, ?)");
+    for (const a of admins) ins.run(a.id, title, message, type);
+  } catch (e) {
+    console.warn('[ims-bot] notifyAdmins failed:', e.message);
+  }
+}
+
 function start() {
   status.enabled = ENABLED;
   status.baseUrl = BASE_URL;
@@ -338,13 +368,16 @@ function start() {
     status.lastError = 'IMS_USERNAME / IMS_PASSWORD not set';
     return;
   }
+  if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
   status.running = true;
+  emptyStreak = 0;
   console.log(`✓ IMS bot starting (every ${INTERVAL}s, headless=${HEADLESS}, base=${BASE_URL})`);
   setTimeout(tick, 5000);
-  setInterval(tick, INTERVAL * 1000);
+  scrapeTimer = setInterval(tick, INTERVAL * 1000);
 }
 
 async function stop() {
+  if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
   try { await browser?.close(); } catch (_) {}
   browser = null; page = null; loggedIn = false;
   status.running = false;
