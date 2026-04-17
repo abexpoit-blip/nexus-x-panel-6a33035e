@@ -173,11 +173,43 @@ router.get('/summary', authRequired, (req, res) => {
     ).get(u, since);
     return { c: r.c, s: +(+r.s).toFixed(2) };
   };
+  // Average OTP wait time = avg(otp_received_at - allocated_at) in seconds
+  // Calculated over allocations where OTP actually arrived. We expose three windows:
+  //   today / week / month + an all-time number for stability when buckets are small.
+  const avgWait = (since) => {
+    const r = db.prepare(`
+      SELECT
+        COALESCE(AVG(otp_received_at - allocated_at), 0) AS avg_sec,
+        COALESCE(MIN(otp_received_at - allocated_at), 0) AS min_sec,
+        COALESCE(MAX(otp_received_at - allocated_at), 0) AS max_sec,
+        COUNT(*) AS samples
+      FROM allocations
+      WHERE user_id = ?
+        AND status = 'received'
+        AND otp_received_at IS NOT NULL
+        AND allocated_at IS NOT NULL
+        AND otp_received_at >= allocated_at
+        AND otp_received_at >= ?
+    `).get(u, since);
+    return {
+      avg_sec: Math.round(r.avg_sec || 0),
+      min_sec: Math.round(r.min_sec || 0),
+      max_sec: Math.round(r.max_sec || 0),
+      samples: r.samples || 0,
+    };
+  };
+
   res.json({
     today: cnt(todayStart),
     week: cnt(weekStart),
     month: cnt(monthStart),
     active: db.prepare("SELECT COUNT(*) c FROM allocations WHERE user_id=? AND status='active'").get(u).c,
+    wait_time: {
+      today: avgWait(todayStart),
+      week: avgWait(weekStart),
+      month: avgWait(monthStart),
+      all_time: avgWait(0),
+    },
   });
 });
 

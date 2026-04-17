@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { OtpLine, SuccessGauge } from "@/components/charts/Charts";
+import { AvgOtpWaitTime } from "@/components/AvgOtpWaitTime";
 import { useMemo } from "react";
 
 const AgentDashboard = () => {
@@ -91,35 +92,9 @@ const AgentDashboard = () => {
         </GlassCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <GlassCard className="lg:col-span-2 p-6">
-          <h3 className="font-display font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-primary" /> Recent Numbers
-          </h3>
-          {!recent.length && <p className="text-sm text-muted-foreground/60 text-center py-12">No activity yet — go to Get Number to start</p>}
-          <div className="space-y-2">
-            {recent.map((item) => (
-              <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-white/[0.02] border-b border-white/[0.04] last:border-0">
-                <div className="flex items-center gap-3">
-                  <span className={cn("w-2 h-2 rounded-full",
-                    item.status === "received" ? "bg-neon-green" : item.status === "active" ? "bg-neon-amber animate-pulse" : "bg-muted-foreground"
-                  )} />
-                  <div>
-                    <p className="text-sm font-mono text-foreground">{item.phone_number}</p>
-                    <p className="text-xs text-muted-foreground">{item.operator || "—"}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={cn("text-sm font-mono",
-                    item.otp ? "text-neon-green" : "text-muted-foreground"
-                  )}>{item.otp || "waiting…"}</p>
-                  <p className="text-xs text-muted-foreground">{new Date(item.allocated_at * 1000).toLocaleTimeString()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </GlassCard>
-
+      {/* Avg OTP Wait Time + Earnings */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <AvgOtpWaitTime data={summary?.wait_time} />
         <GlassCard className="p-6">
           <h3 className="font-display font-semibold text-foreground mb-4 flex items-center gap-2">
             <Activity className="w-4 h-4 text-neon-amber" /> Earnings This Period
@@ -132,6 +107,34 @@ const AgentDashboard = () => {
           </div>
         </GlassCard>
       </div>
+
+      <GlassCard className="p-6">
+        <h3 className="font-display font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-primary" /> Recent Numbers
+        </h3>
+        {!recent.length && <p className="text-sm text-muted-foreground/60 text-center py-12">No activity yet — go to Get Number to start</p>}
+        <div className="space-y-2">
+          {recent.map((item) => (
+            <div key={item.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-white/[0.02] border-b border-white/[0.04] last:border-0">
+              <div className="flex items-center gap-3">
+                <span className={cn("w-2 h-2 rounded-full",
+                  item.status === "received" ? "bg-neon-green" : item.status === "active" ? "bg-neon-amber animate-pulse" : "bg-muted-foreground"
+                )} />
+                <div>
+                  <p className="text-sm font-mono text-foreground">{item.phone_number}</p>
+                  <p className="text-xs text-muted-foreground">{item.operator || "—"}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className={cn("text-sm font-mono",
+                  item.otp ? "text-neon-green" : "text-muted-foreground"
+                )}>{item.otp || "waiting…"}</p>
+                <p className="text-xs text-muted-foreground">{new Date(item.allocated_at * 1000).toLocaleTimeString()}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </GlassCard>
     </div>
   );
 };

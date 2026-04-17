@@ -154,6 +154,32 @@ function demoRoute(path: string, opts: RequestInit): any {
       { id: "ims", name: "IMS SMS", configured: true, baseUrl: "https://www.imssms.org", username: "Sh****n7", loggedIn: true, balance: null, currency: "USD", lastError: null, otpHistoryCount: 0 },
     ],
   };
+  if (path === "/admin/system-health") {
+    const now = Math.floor(Date.now() / 1000);
+    return {
+      server: {
+        uptime_sec: 86400 + 3600 * 7,
+        node_version: "v20.11.1",
+        env: "production",
+        memory_mb: { rss: 142.3, heap_used: 68.7, heap_total: 95.4 },
+      },
+      database: {
+        size_bytes: 4_823_552,
+        size_mb: 4.6,
+        path: "./data/nexus.db",
+        last_backup: { name: "nexus-2025-04-17-0400.db.gz", size: 1_234_000, mtime: now - 3600 * 9 },
+        backup_dir: "/opt/nexus/backups",
+      },
+      ims_bot: {
+        enabled: true, running: true, logged_in: true,
+        pool_size: 4823, active_assigned: 12,
+        last_scrape_at: now - 22, last_scrape_ok: true,
+        interval_sec: 60, otp_interval_sec: 10, consec_fail: 0, last_error: null,
+      },
+      acchub_poller: { running: true, lastTickAt: now - 4 },
+      counts: { pending_withdrawals: 2, active_sessions: 5, ims_pool_size: 4823 },
+    };
+  }
 
   if (path === "/rates") return demoData.rates();
   if (path === "/cdr" || path === "/cdr/mine") return demoData.cdr();
@@ -265,7 +291,15 @@ export const api = {
     request<{ added: number; skipped: number; invalid: number; range: string }>("/numbers/ims/pool", { method: "POST", body: JSON.stringify(body) }),
   myNumbers: () => request<{ numbers: Allocation[] }>("/numbers/my"),
   releaseNumber: (id: number) => request(`/numbers/release/${id}`, { method: "POST" }),
-  numberSummary: () => request<{ today: { c: number; s: number }; week: { c: number; s: number }; month: { c: number; s: number }; active: number }>("/numbers/summary"),
+  numberSummary: () => request<{
+    today: { c: number; s: number };
+    week: { c: number; s: number };
+    month: { c: number; s: number };
+    active: number;
+    wait_time?: {
+      today: WaitStat; week: WaitStat; month: WaitStat; all_time: WaitStat;
+    };
+  }>("/numbers/summary"),
   syncOtp: () => request<{ updated: number }>("/otp/sync", { method: "POST" }),
   pricing: () => request<{ pricing: { id: number; name: string; code: string; flag: string; price_bdt: number; operator_count: number }[] }>("/numbers/pricing"),
 
@@ -403,6 +437,7 @@ export const api = {
     acchubCredentialsSave: (body: { username?: string; password?: string; base_url?: string }) =>
       request<{ ok: boolean }>("/admin/acchub-credentials", { method: "PUT", body: JSON.stringify(body) }),
     acchubTest: () => request<{ ok: boolean; status?: ProviderStatus; error?: string }>("/admin/acchub-test", { method: "POST" }),
+    systemHealth: () => request<SystemHealth>("/admin/system-health"),
   },
 };
 
@@ -417,4 +452,46 @@ export interface ProviderStatus {
   currency?: string;
   lastError?: string | null;
   otpHistoryCount?: number;
+}
+
+export interface WaitStat {
+  avg_sec: number;
+  min_sec: number;
+  max_sec: number;
+  samples: number;
+}
+
+export interface SystemHealth {
+  server: {
+    uptime_sec: number;
+    node_version: string;
+    env: string;
+    memory_mb: { rss: number; heap_used: number; heap_total: number };
+  };
+  database: {
+    size_bytes: number;
+    size_mb: number;
+    path: string;
+    last_backup: { name: string; size: number; mtime: number } | null;
+    backup_dir: string;
+  };
+  ims_bot: {
+    enabled: boolean;
+    running: boolean;
+    logged_in?: boolean;
+    pool_size: number;
+    active_assigned?: number;
+    last_scrape_at?: number | null;
+    last_scrape_ok?: boolean;
+    interval_sec?: number | null;
+    otp_interval_sec?: number | null;
+    consec_fail?: number;
+    last_error?: string | null;
+  };
+  acchub_poller: { running?: boolean; lastTickAt?: number } | null;
+  counts: {
+    pending_withdrawals: number;
+    active_sessions: number;
+    ims_pool_size: number;
+  };
 }
