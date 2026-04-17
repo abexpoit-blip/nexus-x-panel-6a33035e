@@ -35,6 +35,15 @@ router.post('/get', authRequired, async (req, res) => {
   const { provider: providerId, country_id, operator_id, country_code, operator, count = 1 } = req.body || {};
   const userId = req.user.id;
 
+  // Block when maintenance mode is on (admins bypass)
+  if (req.user.role !== 'admin') {
+    const m = db.prepare("SELECT value FROM settings WHERE key = 'maintenance_mode'").get();
+    if (m?.value === 'true') {
+      const msg = db.prepare("SELECT value FROM settings WHERE key = 'maintenance_message'").get();
+      return res.status(503).json({ error: msg?.value || 'System is under maintenance' });
+    }
+  }
+
   // Per-request limit
   const perReq = req.user.per_request_limit || 5;
   const requested = Math.min(+count || 1, perReq);

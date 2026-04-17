@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/StatCard";
 import {
   Shield, UserX, UserCheck, AlertTriangle, Eye, UserPlus, Power,
-  ScrollText, Monitor, LogOut, Smartphone, Globe, Search,
+  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -33,9 +34,10 @@ const parseUA = (ua: string) => {
 
 const AdminSecurity = () => {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"audit" | "sessions" | "settings">("audit");
+  const [tab, setTab] = useState<"audit" | "sessions" | "settings" | "maintenance">("audit");
   const [auditSearch, setAuditSearch] = useState("");
-  const { signupEnabled, setSignupEnabled } = useAuth();
+  const { signupEnabled, setSignupEnabled, maintenanceMode, maintenanceMessage, setMaintenanceMode } = useAuth();
+  const [draftMsg, setDraftMsg] = useState(maintenanceMessage);
 
   const { data: auditData, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-logs"], queryFn: () => api.audit.list({ limit: 200 }), refetchInterval: 30000,
@@ -67,6 +69,7 @@ const AdminSecurity = () => {
     { key: "audit" as const, label: "Audit Log", icon: ScrollText, count: logs.length },
     { key: "sessions" as const, label: "Active Sessions", icon: Monitor, count: sessions.length },
     { key: "settings" as const, label: "Registration", icon: UserPlus },
+    { key: "maintenance" as const, label: "Maintenance", icon: Wrench },
   ];
 
   return (
@@ -247,6 +250,76 @@ const AdminSecurity = () => {
               <span className="text-sm text-muted-foreground">
                 Status: <span className={cn("font-semibold", signupEnabled ? "text-neon-green" : "text-destructive")}>
                   {signupEnabled ? "ACTIVE" : "INACTIVE"}
+                </span>
+              </span>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+      {tab === "maintenance" && (
+        <GlassCard className={maintenanceMode ? "border-neon-amber/40 bg-neon-amber/[0.04]" : ""}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={cn(
+                "w-14 h-14 rounded-2xl flex items-center justify-center",
+                maintenanceMode ? "bg-neon-amber/15" : "bg-neon-green/10"
+              )}>
+                <Wrench className={cn("w-7 h-7", maintenanceMode ? "text-neon-amber" : "text-neon-green")} />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-foreground text-lg">Maintenance Mode</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {maintenanceMode
+                    ? "Agents CANNOT request numbers right now"
+                    : "System OPEN — agents can request numbers normally"}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                setMaintenanceMode(!maintenanceMode, draftMsg);
+                toast.success(maintenanceMode ? "Maintenance disabled — agents can request numbers" : "Maintenance enabled — agents are blocked");
+              }}
+              className={cn(
+                "h-11 font-semibold border-0 px-6",
+                maintenanceMode
+                  ? "bg-gradient-to-r from-primary to-neon-green text-primary-foreground hover:opacity-90"
+                  : "bg-neon-amber/20 text-neon-amber hover:bg-neon-amber/30"
+              )}
+            >
+              {maintenanceMode
+                ? <><Power className="w-4 h-4 mr-2" /> Disable Maintenance</>
+                : <><Wrench className="w-4 h-4 mr-2" /> Enable Maintenance</>}
+            </Button>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-white/[0.06] space-y-3">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Banner message shown to agents</label>
+            <Textarea
+              value={draftMsg}
+              onChange={(e) => setDraftMsg(e.target.value)}
+              placeholder="System is under maintenance. Please try again later."
+              rows={3}
+              className="bg-white/[0.04] border-white/[0.1] resize-none"
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setMaintenanceMode(maintenanceMode, draftMsg);
+                  toast.success("Message saved");
+                }}
+                className="glass border-white/[0.1] hover:bg-white/[0.06]"
+              >
+                Save message
+              </Button>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <div className={cn("w-3 h-3 rounded-full", maintenanceMode ? "bg-neon-amber animate-pulse" : "bg-neon-green")} />
+              <span className="text-sm text-muted-foreground">
+                Status: <span className={cn("font-semibold", maintenanceMode ? "text-neon-amber" : "text-neon-green")}>
+                  {maintenanceMode ? "MAINTENANCE" : "OPERATIONAL"}
                 </span>
               </span>
             </div>

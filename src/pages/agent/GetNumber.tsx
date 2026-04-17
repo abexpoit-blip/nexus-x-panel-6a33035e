@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
-import { Hash, Copy, Check, Download, Search, ChevronDown, Wallet } from "lucide-react";
+import { Hash, Copy, Check, Download, Search, ChevronDown, Wallet, AlertTriangle, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
@@ -30,7 +30,7 @@ interface Operator {
 }
 
 const AgentGetNumber = () => {
-  const { user } = useAuth();
+  const { user, maintenanceMode, maintenanceMessage } = useAuth();
   const provider = "acchub"; // hidden from agents
   const [countries, setCountries] = useState<Country[]>([]);
   const [countryId, setCountryId] = useState<number | "">("");
@@ -40,6 +40,7 @@ const AgentGetNumber = () => {
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [copiedOtpId, setCopiedOtpId] = useState<number | null>(null);
+  const [quantity, setQuantity] = useState(1);
 
   // Country search dropdown
   const [countryOpen, setCountryOpen] = useState(false);
@@ -53,6 +54,10 @@ const AgentGetNumber = () => {
   const selectedCountry = countries.find((c) => c.id === countryId);
   const selectedOperator = operators.find((o) => o.id === operatorId);
   const cost = selectedOperator?.price_bdt ?? selectedCountry?.price_bdt ?? null;
+  const totalCost = cost != null ? cost * quantity : null;
+
+  // Quantity options capped to per-request limit
+  const quantityOptions = [1, 5, 10, 15].filter((q) => q <= maxPerRequest);
 
   useEffect(() => {
     api.myNumbers().then(({ numbers }) => setNumbers(numbers as AllocatedNumber[])).catch(() => {});
@@ -83,6 +88,10 @@ const AgentGetNumber = () => {
   }, [countries, countrySearch]);
 
   const handleGetNumber = async () => {
+    if (maintenanceMode) {
+      toast({ title: "Maintenance mode", description: maintenanceMessage, variant: "destructive" });
+      return;
+    }
     if (!countryId || !operatorId) {
       toast({ title: "Select country & operator", variant: "destructive" });
       return;
@@ -93,10 +102,10 @@ const AgentGetNumber = () => {
         provider,
         country_id: Number(countryId),
         operator_id: Number(operatorId),
-        count: 1,
+        count: quantity,
       });
       setNumbers((prev) => [...allocated.map((a: AllocatedNumber) => ({ ...a, status: "active" as const })), ...prev]);
-      if (allocated.length) toast({ title: "Number allocated!", description: allocated[0].phone_number });
+      if (allocated.length) toast({ title: `${allocated.length} number${allocated.length > 1 ? "s" : ""} allocated!`, description: allocated[0].phone_number });
       if (errors.length) toast({ title: "Some failed", description: errors.join(", "), variant: "destructive" });
     } catch (e: unknown) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
@@ -149,6 +158,19 @@ const AgentGetNumber = () => {
         <h1 className="text-2xl font-display font-bold text-foreground">Get Number</h1>
         <p className="text-sm text-muted-foreground mt-1">Search a country, pick an operator, and request a fresh number</p>
       </div>
+
+      {maintenanceMode && (
+        <GlassCard className="border-neon-amber/40 bg-neon-amber/[0.06]">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-6 h-6 text-neon-amber shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-display font-semibold text-neon-amber">Maintenance Mode Active</h3>
+              <p className="text-sm text-muted-foreground mt-1">{maintenanceMessage}</p>
+              <p className="text-xs text-muted-foreground mt-2">Number allocation is temporarily disabled. Please check back soon.</p>
+            </div>
+          </div>
+        </GlassCard>
+      )}
 
       <GlassCard glow="cyan">
         <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_auto] gap-4 items-end">
@@ -233,19 +255,48 @@ const AgentGetNumber = () => {
 
           <Button
             onClick={handleGetNumber}
-            disabled={loading || usedToday >= dailyLimit || !operatorId}
-            className="h-11 bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground font-semibold hover:opacity-90 border-0 min-w-[160px]"
+            disabled={loading || maintenanceMode || usedToday >= dailyLimit || !operatorId}
+            className="h-11 bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground font-semibold hover:opacity-90 border-0 min-w-[180px]"
           >
             {loading ? (
               <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
             ) : (
               <>
                 <Hash className="w-4 h-4 mr-2" />
-                Get Number{cost != null ? ` · ৳${cost}` : ""}
+                Get {quantity > 1 ? `${quantity} Numbers` : "Number"}
+                {totalCost != null ? ` · ৳${totalCost}` : ""}
               </>
             )}
           </Button>
         </div>
+
+        {/* Bulk quantity selector */}
+        {quantityOptions.length > 1 && (
+          <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-white/[0.06] flex-wrap">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-neon-cyan" />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Bulk request</span>
+            </div>
+            <div className="flex gap-2">
+              {quantityOptions.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => setQuantity(q)}
+                  disabled={maintenanceMode}
+                  className={cn(
+                    "min-w-[64px] h-9 px-3 rounded-lg text-xs font-bold transition-all border",
+                    quantity === q
+                      ? "bg-gradient-to-r from-primary to-neon-magenta text-primary-foreground border-transparent shadow-[0_0_18px_-4px_hsl(var(--primary)/0.6)]"
+                      : "bg-white/[0.03] text-foreground border-white/[0.08] hover:bg-white/[0.08] hover:border-white/[0.16]",
+                    maintenanceMode && "opacity-40 cursor-not-allowed",
+                  )}
+                >
+                  {q}× {cost != null && <span className="ml-1 opacity-80">৳{cost * q}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/[0.06] flex-wrap gap-3">
           <div className="flex gap-6 flex-wrap">
