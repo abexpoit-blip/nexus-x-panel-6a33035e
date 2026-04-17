@@ -66,20 +66,52 @@ router.get('/withdrawals/mine', authRequired, (req, res) => {
 
 // POST /api/withdrawals — agent requests
 router.post('/withdrawals', authRequired, (req, res) => {
-  const { amount_bdt, method, account_name, account_number } = req.body || {};
-  const amt = +amount_bdt;
-  if (!amt || amt <= 0 || !method || !account_number) {
-    return res.status(400).json({ error: 'amount_bdt, method, account_number required' });
+  const { amount_bdt, method, account_name, account_number, note } = req.body || {};
+  const amt = Number(amount_bdt);
+
+  if (!Number.isFinite(amt) || amt <= 0 || amt > 1_000_000) {
+    return res.status(400).json({ error: 'Invalid amount (must be 1 — 1,000,000)' });
+  }
+  const allowedMethods = ['bkash', 'nagad', 'rocket', 'bank', 'crypto'];
+  if (!allowedMethods.includes(method)) {
+    return res.status(400).json({ error: 'Invalid payment method' });
+  }
+  if (typeof account_number !== 'string' || account_number.length < 3 || account_number.length > 100) {
+    return res.status(400).json({ error: 'Account number must be 3-100 chars' });
+  }
+  if (account_name && (typeof account_name !== 'string' || account_name.length > 120)) {
+    return res.status(400).json({ error: 'Invalid account name' });
+  }
+  if (note && (typeof note !== 'string' || note.length > 500)) {
+    return res.status(400).json({ error: 'Note too long (max 500 chars)' });
   }
   if (amt > req.user.balance) return res.status(400).json({ error: 'Insufficient balance' });
 
-  const result = db.prepare(`
-    INSERT INTO withdrawals (user_id, amount_bdt, method, account_name, account_number, status)
-    VALUES (?, ?, ?, ?, ?, 'pending')
-  `).run(req.user.id, amt, method, account_name || null, account_number);
+  const tx = db.transaction(() => {
+    const r = db.prepare(`
+      INSERT INTO withdrawals (user_id, amount_bdt, method, account_name, account_number, note, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending')
+    `).run(req.user.id, amt, method, account_name || null, account_number, note || null);
 
-  logFromReq(req, 'withdrawal_request', { targetType: 'withdrawal', targetId: result.lastInsertRowid });
-  res.status(201).json({ id: result.lastInsertRowid });
+    // Notify all active admins so they see it in real time on the bell
+    const admins = db.prepare("SELECT id FROM users WHERE role = 'admin' AND status = 'active'").all();
+    const insertNotif = db.prepare(`
+      INSERT INTO notifications (user_id, title, message, type)
+      VALUES (?, ?, ?, 'warning')
+    `);
+    for (const a of admins) {
+      insertNotif.run(
+        a.id,
+        '💰 New Withdrawal Request',
+        `${req.user.username} requested ৳${amt.toFixed(2)} via ${method.toUpperCase()}`
+      );
+    }
+    return r.lastInsertRowid;
+  });
+  const id = tx();
+
+  logFromReq(req, 'withdrawal_request', { targetType: 'withdrawal', targetId: id });
+  res.status(201).json({ id });
 });
 
 // POST /api/withdrawals/:id/approve — admin

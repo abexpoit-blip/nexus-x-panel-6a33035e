@@ -20,6 +20,7 @@
     "axios": "^1.7.7",
     "morgan": "^1.10.0",
     "express-rate-limit": "^7.4.0",
+    "helmet": "^8.0.0",
     "puppeteer": "^23.5.0"
   },
   "devDependencies": {

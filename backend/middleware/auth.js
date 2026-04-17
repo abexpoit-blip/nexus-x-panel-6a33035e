@@ -3,19 +3,30 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const db = require('../lib/db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Hard-fail in production if JWT_SECRET is missing or weak
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET must be set to a strong (>=32 char) value in production.');
+    process.exit(1);
+  } else {
+    console.warn('⚠️  JWT_SECRET is missing/weak — using dev fallback. NEVER deploy like this.');
+  }
+}
+
+const SECRET = JWT_SECRET || 'dev-only-fallback-secret-do-not-use-in-prod-xxxxxxxxxxxxxxxxxx';
 
 function hashToken(t) {
   return crypto.createHash('sha256').update(t).digest('hex');
 }
 
 function signToken(user) {
-  const token = jwt.sign(
+  return jwt.sign(
     { sub: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
+    SECRET,
     { expiresIn: '30d' }
   );
-  return token;
 }
 
 function recordSession(userId, token, req) {
@@ -33,7 +44,7 @@ function authRequired(req, res, next) {
   }
   const token = header.slice(7);
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, SECRET);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.sub);
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.status !== 'active') return res.status(403).json({ error: 'Account suspended' });
@@ -41,7 +52,7 @@ function authRequired(req, res, next) {
     req.token = token;
 
     // Update session last_seen (best effort)
-    db.prepare('UPDATE sessions SET last_seen_at = strftime(\'%s\',\'now\') WHERE token_hash = ?')
+    db.prepare("UPDATE sessions SET last_seen_at = strftime('%s','now') WHERE token_hash = ?")
       .run(hashToken(token));
 
     next();
@@ -57,4 +68,4 @@ function adminOnly(req, res, next) {
   next();
 }
 
-module.exports = { authRequired, adminOnly, signToken, recordSession, hashToken, JWT_SECRET };
+module.exports = { authRequired, adminOnly, signToken, recordSession, hashToken, JWT_SECRET: SECRET };
