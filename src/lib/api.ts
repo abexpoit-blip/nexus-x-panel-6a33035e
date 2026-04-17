@@ -90,6 +90,7 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
   try {
     const res = await fetch(`${BASE}${path}`, {
       ...opts,
+      credentials: "include",                    // ← send/receive httpOnly cookie
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -234,7 +235,10 @@ export const api = {
   // Auth
   login: (username: string, password: string) =>
     request<{ token: string; user: any }>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
-  me: () => request<{ user: any }>("/auth/me"),
+  me: () => request<{ user: any; impersonator?: { id: number; username: string } | null }>("/auth/me"),
+  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+  exitImpersonation: () =>
+    request<{ token: string; user: any }>("/auth/exit-impersonation", { method: "POST" }),
 
   // Numbers
   providers: () => request<{ providers: { id: string; name: string }[] }>("/numbers/providers"),
