@@ -50,29 +50,12 @@ function playNotificationSound(volume: number) {
   }
 }
 
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  { id: "1", type: "info", title: "New BD range added", message: "Grameenphone numbers now available for allocation", time: new Date(Date.now() - 2 * 60000), read: false, icon: "📱" },
-  { id: "2", type: "success", title: "Rate card updated", message: "Robi operator rates adjusted to ৳22/OTP", time: new Date(Date.now() - 60 * 60000), read: false, icon: "💰" },
-  { id: "3", type: "warning", title: "Provider latency spike", message: "IMS SMS latency exceeded 500ms threshold", time: new Date(Date.now() - 90 * 60000), read: false, icon: "⚡" },
-  { id: "4", type: "system", title: "Scheduled maintenance", message: "System maintenance window at 3:00 AM BST", time: new Date(Date.now() - 3 * 3600000), read: true, icon: "🔧" },
-  { id: "5", type: "error", title: "Seven1Tel offline", message: "Provider connection lost — 6,800 numbers affected", time: new Date(Date.now() - 4 * 3600000), read: true, icon: "🚫" },
-];
+// Production: no fake/simulated notifications. Real notifications come from
+// backend via NotificationBell polling. This context handles in-app
+// announcements (admin broadcasts) and user notification preferences.
+const INITIAL_NOTIFICATIONS: Notification[] = [];
 
-const SIMULATED_EVENTS: Omit<Notification, "id" | "time" | "read">[] = [
-  { type: "success", title: "Agent registered", message: "agent_phoenix just created an account", icon: "🆕" },
-  { type: "info", title: "OTP batch completed", message: "245 OTPs delivered successfully via AccHub", icon: "✅" },
-  { type: "warning", title: "High traffic alert", message: "SMS volume exceeding 500/min on MSI SMS", icon: "📊" },
-  { type: "success", title: "Withdrawal processed", message: "agent_pro withdrew ৳5,200 to bKash", icon: "💸" },
-  { type: "info", title: "Numbers restocked", message: "1,200 new Banglalink numbers added to pool", icon: "📱" },
-  { type: "error", title: "Failed delivery", message: "12 OTPs failed on IMS SMS — auto-rerouting", icon: "⚠️" },
-  { type: "system", title: "Rate limit triggered", message: "agent_king exceeded 50 req/min — throttled", icon: "🛡️" },
-];
-
-const INITIAL_ANNOUNCEMENTS: Announcement[] = [
-  { id: "a1", type: "info", title: "New BD Grameenphone range added", message: "500 new numbers available for BD-GP. Check Get Number to allocate.", time: new Date(Date.now() - 2 * 3600000), read: false, icon: "📱" },
-  { id: "a2", type: "success", title: "Rate update for Robi", message: "Sell rate increased to ৳1.20 per OTP effective immediately.", time: new Date(Date.now() - 24 * 3600000), read: false, icon: "💰" },
-  { id: "a3", type: "system", title: "Scheduled maintenance", message: "System maintenance window at 3:00 AM BST on April 18. Expect 15 min downtime.", time: new Date(Date.now() - 48 * 3600000), read: true, icon: "🔧" },
-];
+const INITIAL_ANNOUNCEMENTS: Announcement[] = [];
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
