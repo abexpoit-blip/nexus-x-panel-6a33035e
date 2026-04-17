@@ -216,6 +216,7 @@ export type Withdrawal = {
   method: string; account_name?: string; account_number: string;
   status: "pending" | "approved" | "rejected"; note?: string;
   admin_note?: string; reviewed_by?: number; reviewed_at?: number;
+  processed_at?: number;
   created_at: number;
 };
 export type Notification = {
