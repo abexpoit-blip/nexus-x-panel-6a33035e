@@ -140,6 +140,10 @@ function demoRoute(path: string, opts: RequestInit): any {
   if (path === "/admin/allocations") return demoData.allocations();
   if (path === "/admin/agents") return demoData.agents();
   if (path === "/admin/ims-status") return { status: demoImsState.snapshot() };
+  if (path === "/admin/impersonations") return { impersonations: [
+    { id: 1, created_at: Math.floor(Date.now()/1000) - 1800, action: "impersonation_start", admin_id: 1, agent_id: 2, admin_username: "admin", agent_username: "demo_agent", ip: "127.0.0.1", meta: '{"username":"demo_agent"}' },
+    { id: 2, created_at: Math.floor(Date.now()/1000) - 1500, action: "impersonation_end", admin_id: 1, agent_id: 2, admin_username: "admin", agent_username: "demo_agent", ip: "127.0.0.1" },
+  ] };
   if (path === "/admin/ims-restart" && method === "POST") { demoImsState.restart(); return { ok: true }; }
   if (path === "/admin/ims-start" && method === "POST") { demoImsState.start(); return { ok: true }; }
   if (path === "/admin/ims-stop" && method === "POST") { demoImsState.stop(); return { ok: true }; }

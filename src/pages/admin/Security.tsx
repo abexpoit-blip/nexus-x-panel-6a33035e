@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/StatCard";
 import {
   Shield, UserX, UserCheck, AlertTriangle, Eye, UserPlus, Power,
-  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench,
+  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench, ShieldAlert,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -34,7 +34,7 @@ const parseUA = (ua: string) => {
 
 const AdminSecurity = () => {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"audit" | "sessions" | "settings" | "maintenance">("audit");
+  const [tab, setTab] = useState<"audit" | "sessions" | "impersonation" | "settings" | "maintenance">("audit");
   const [auditSearch, setAuditSearch] = useState("");
   const { signupEnabled, setSignupEnabled, maintenanceMode, maintenanceMessage, setMaintenanceMode } = useAuth();
   const [draftMsg, setDraftMsg] = useState(maintenanceMessage);
@@ -44,6 +44,9 @@ const AdminSecurity = () => {
   });
   const { data: sessData, isLoading: sessLoading } = useQuery({
     queryKey: ["sessions-all"], queryFn: () => api.sessions.all(), refetchInterval: 30000,
+  });
+  const { data: impData, isLoading: impLoading } = useQuery({
+    queryKey: ["impersonations"], queryFn: () => api.admin.impersonations(), refetchInterval: 30000,
   });
 
   const revoke = useMutation({
@@ -65,9 +68,11 @@ const AdminSecurity = () => {
   );
   const sessions = sessData?.sessions || [];
 
+  const impersonations = impData?.impersonations || [];
   const tabs = [
     { key: "audit" as const, label: "Audit Log", icon: ScrollText, count: logs.length },
     { key: "sessions" as const, label: "Active Sessions", icon: Monitor, count: sessions.length },
+    { key: "impersonation" as const, label: "Impersonation", icon: ShieldAlert, count: impersonations.length },
     { key: "settings" as const, label: "Registration", icon: UserPlus },
     { key: "maintenance" as const, label: "Maintenance", icon: Wrench },
   ];
