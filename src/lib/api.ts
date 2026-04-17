@@ -154,6 +154,7 @@ function demoRoute(path: string, opts: RequestInit): any {
   if (path === "/withdrawals" || path === "/withdrawals/pending" || path === "/withdrawals/mine") return demoData.withdrawals();
 
   if (path === "/numbers/providers") return demoData.providers();
+  if (path === "/numbers/pricing") return demoData.pricing();
   if (path.startsWith("/numbers/countries/")) return demoData.countries();
   if (path.startsWith("/numbers/operators/")) {
     const parts = path.split("/");
@@ -242,6 +243,7 @@ export const api = {
   releaseNumber: (id: number) => request(`/numbers/release/${id}`, { method: "POST" }),
   numberSummary: () => request<{ today: { c: number; s: number }; week: { c: number; s: number }; month: { c: number; s: number }; active: number }>("/numbers/summary"),
   syncOtp: () => request<{ updated: number }>("/otp/sync", { method: "POST" }),
+  pricing: () => request<{ pricing: { id: number; name: string; code: string; flag: string; price_bdt: number; operator_count: number }[] }>("/numbers/pricing"),
 
   // Rates
   rates: {
