@@ -53,6 +53,7 @@ let consecFail = 0;
 let loggedIn = false;
 let emptyStreak = 0;        // consecutive scrapes returning 0 numbers
 let scrapeTimer = null;     // for graceful stop
+let otpTimer = null;        // fast OTP-only poll loop
 const EMPTY_LIMIT = +(process.env.IMS_EMPTY_LIMIT || 10);
 let lastLowPoolAlertAt = 0;   // unix seconds — debounce low-pool notifications
 
@@ -369,6 +370,8 @@ async function scrapeOtps() {
 }
 
 // One full pass.
+// IMPORTANT ordering: scrape OTPs FIRST so already-assigned numbers get their codes
+// delivered ASAP (this is what agents care about most). New numbers come second.
 async function tick() {
   if (busy) return;
   busy = true;
@@ -376,14 +379,13 @@ async function tick() {
     await ensureBrowser();
     if (!loggedIn) await login();
 
-    // 1) Numbers → pool
+    // 1) OTPs FIRST → match active allocations & credit (priority — agents waiting)
+    await deliverOtps();
+
+    // 2) Numbers → pool (only if there are active allocations or pool is healthy)
     const nums = await scrapeNumbers().catch((e) => { dwarn('[ims-bot] scrapeNumbers:', e.message); return []; });
     if (nums.length) {
-      let sysUser = db.prepare("SELECT id FROM users WHERE username = '__ims_pool__'").get();
-      if (!sysUser) {
-        const r = db.prepare(`INSERT INTO users (username, password_hash, role, status) VALUES ('__ims_pool__', '!', 'agent', 'suspended')`).run();
-        sysUser = { id: r.lastInsertRowid };
-      }
+      const sysUser = ensurePoolUser();
       const exists = db.prepare("SELECT 1 FROM allocations WHERE provider='ims' AND phone_number=? LIMIT 1");
       const ins = db.prepare(`
         INSERT INTO allocations (user_id, provider, phone_number, country_code, operator, status, allocated_at)
@@ -404,48 +406,22 @@ async function tick() {
         console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
         logEvent('success', `Pool +${added} new numbers`, { scraped: nums.length });
       }
+    }
 
-      // Auto-pause: track consecutive empty scrapes
-      if (nums.length === 0) {
-        emptyStreak++;
-        if (emptyStreak >= EMPTY_LIMIT) {
-          const msg = `IMS bot auto-paused: ${EMPTY_LIMIT} consecutive empty scrapes`;
-          console.warn(`[ims-bot] ${msg}`);
-          logEvent('warn', msg);
-          notifyAdmins('IMS Bot Auto-Paused', `No numbers found in last ${EMPTY_LIMIT} scrapes. Bot stopped to save resources. Click Start when IMS has stock.`, 'warning');
-          await stop();
-          emptyStreak = 0;
-          return;
-        }
-      } else {
+    // Auto-pause: track consecutive empty scrapes
+    if (nums.length === 0) {
+      emptyStreak++;
+      if (emptyStreak >= EMPTY_LIMIT) {
+        const msg = `IMS bot auto-paused: ${EMPTY_LIMIT} consecutive empty scrapes`;
+        console.warn(`[ims-bot] ${msg}`);
+        logEvent('warn', msg);
+        notifyAdmins('IMS Bot Auto-Paused', `No numbers found in last ${EMPTY_LIMIT} scrapes. Bot stopped to save resources. Click Start when IMS has stock.`, 'warning');
+        await stop();
         emptyStreak = 0;
+        return;
       }
-    }
-
-    // 2) OTPs → match active allocations & credit
-    //    IMS returns newest first; we de-dupe per phone (keep newest only) before matching,
-    //    so a number that received multiple OTPs gets the latest one.
-    const otpsRaw = await scrapeOtps().catch((e) => { dwarn('[ims-bot] scrapeOtps:', e.message); return []; });
-    const seenPhones = new Set();
-    const otps = [];
-    for (const o of otpsRaw) {
-      if (seenPhones.has(o.phone_number)) continue;
-      seenPhones.add(o.phone_number);
-      otps.push(o);
-    }
-    for (const o of otps) {
-      const a = db.prepare(`
-        SELECT * FROM allocations
-        WHERE provider='ims' AND phone_number=? AND status='active' AND otp IS NULL
-          AND (? = 0 OR allocated_at <= ?)
-        ORDER BY allocated_at DESC LIMIT 1
-      `).get(o.phone_number, o.date_ts || 0, o.date_ts || 0);
-      if (a) {
-        await markOtpReceived(a, o.otp_code);
-        status.otpsDeliveredTotal++;
-        console.log(`[ims-bot] OTP delivered: ${o.phone_number} → ${o.otp_code} (alloc#${a.id})`);
-        logEvent('success', `OTP delivered to ${o.phone_number}`, { otp: o.otp_code, alloc: a.id });
-      }
+    } else {
+      emptyStreak = 0;
     }
 
     consecFail = 0;
@@ -455,7 +431,6 @@ async function tick() {
     status.totalScrapes++;
 
     // Low-pool alert — fire once per cooldown window when pool drops below threshold.
-    // Threshold + cooldown live in `settings` so admin can tweak from the UI later.
     try {
       const threshold = +(readSetting('ims_low_pool_threshold') || 100);
       const cooldownMin = +(readSetting('ims_low_pool_cooldown_min') || 60);
@@ -495,6 +470,47 @@ async function tick() {
   }
 }
 
+// Helper: pull OTPs once and credit any matching active allocations.
+// Used by tick() AND by the lightweight `pollOtpsNow()` fast-poll loop.
+async function deliverOtps() {
+  const otpsRaw = await scrapeOtps().catch((e) => { dwarn('[ims-bot] scrapeOtps:', e.message); return []; });
+  if (!otpsRaw.length) return 0;
+  const seenPhones = new Set();
+  const otps = [];
+  for (const o of otpsRaw) {
+    if (seenPhones.has(o.phone_number)) continue;
+    seenPhones.add(o.phone_number);
+    otps.push(o);
+  }
+  let delivered = 0;
+  for (const o of otps) {
+    const a = db.prepare(`
+      SELECT * FROM allocations
+      WHERE provider='ims' AND phone_number=? AND status='active' AND otp IS NULL
+        AND (? = 0 OR allocated_at <= ?)
+      ORDER BY allocated_at DESC LIMIT 1
+    `).get(o.phone_number, o.date_ts || 0, o.date_ts || 0);
+    if (a) {
+      await markOtpReceived(a, o.otp_code);
+      status.otpsDeliveredTotal++;
+      delivered++;
+      console.log(`[ims-bot] OTP delivered: ${o.phone_number} → ${o.otp_code} (alloc#${a.id})`);
+      logEvent('success', `OTP delivered to ${o.phone_number}`, { otp: o.otp_code, alloc: a.id });
+    }
+  }
+  return delivered;
+}
+
+// Helper: ensure system pool-owner user exists
+function ensurePoolUser() {
+  let u = db.prepare("SELECT id FROM users WHERE username = '__ims_pool__'").get();
+  if (!u) {
+    const r = db.prepare(`INSERT INTO users (username, password_hash, role, status) VALUES ('__ims_pool__', '!', 'agent', 'suspended')`).run();
+    u = { id: r.lastInsertRowid };
+  }
+  return u;
+}
+
 // Notify all admins (broadcast-style — one row per admin user)
 function notifyAdmins(title, message, type = 'warning') {
   try {
@@ -524,15 +540,38 @@ function start() {
     return;
   }
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
+  if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
   status.running = true;
   emptyStreak = 0;
   console.log(`✓ IMS bot starting (every ${INTERVAL}s, headless=${HEADLESS}, base=${BASE_URL})`);
   setTimeout(tick, 5000);
   scrapeTimer = setInterval(tick, INTERVAL * 1000);
+
+  // FAST OTP loop — every OTP_INTERVAL seconds (default 10s) we ONLY scrape the
+  // OTP/CDR page (no number list, no pagination). This is what makes assigned
+  // numbers receive their OTP within ~10s of arrival, even though the heavy
+  // number-list scrape only runs every 60s.
+  const OTP_INTERVAL = +(process.env.IMS_OTP_INTERVAL || 10);
+  otpTimer = setInterval(pollOtpsNow, OTP_INTERVAL * 1000);
+}
+
+// Lightweight OTP-only poll — runs frequently between heavy ticks.
+// Skips entirely if a heavy tick is in progress (which already delivers OTPs).
+async function pollOtpsNow() {
+  if (busy || !loggedIn || !page) return;
+  busy = true;
+  try {
+    await deliverOtps();
+  } catch (e) {
+    dwarn('[ims-bot] otp-poll:', e.message);
+  } finally {
+    busy = false;
+  }
 }
 
 async function stop() {
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
+  if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
   try { await browser?.close(); } catch (_) {}
   browser = null; page = null; loggedIn = false;
   status.running = false;
@@ -614,4 +653,87 @@ async function scrapeNow() {
   };
 }
 
-module.exports = { start, stop, restart, tick, scrapeNow, solveCaptchaText, getStatus, logEvent };
+// =============================================================
+// Live-sync: scrape IMS once and reconcile our pool with reality.
+//   • Adds any new numbers IMS now has (same as a normal scrape)
+//   • Deletes pool numbers that are NO LONGER in IMS (sold/expired upstream)
+//   • Active/received/expired allocations are NEVER touched (agent owns them)
+// Returns: { ok, added, removed, kept, scraped, ranges }
+// =============================================================
+async function syncLive() {
+  if (!status.running) return { ok: false, error: 'Bot is not running — start it first' };
+  if (busy) return { ok: false, error: 'A scrape is already in progress' };
+
+  busy = true;
+  try {
+    await ensureBrowser();
+    if (!loggedIn) await login();
+
+    logEvent('info', 'Live-sync triggered by admin');
+    const nums = await scrapeNumbers();
+    if (!nums.length) {
+      return { ok: false, error: 'No numbers returned from IMS — login or page issue?' };
+    }
+
+    const live = new Set(nums.map(n => n.phone_number));
+    const sysUser = ensurePoolUser();
+
+    // Track ranges (operators) that appeared in this scrape
+    const liveRanges = new Set(nums.map(n => n.operator).filter(Boolean));
+
+    let added = 0, removed = 0, kept = 0;
+    const exists = db.prepare("SELECT 1 FROM allocations WHERE provider='ims' AND phone_number=? LIMIT 1");
+    const ins = db.prepare(`
+      INSERT INTO allocations (user_id, provider, phone_number, country_code, operator, status, allocated_at)
+      VALUES (?, 'ims', ?, ?, ?, 'pool', strftime('%s','now'))
+    `);
+    // Pool snapshot: only POOL rows are eligible for deletion. Active/received/expired untouched.
+    const poolRows = db.prepare(
+      "SELECT id, phone_number FROM allocations WHERE provider='ims' AND status='pool'"
+    ).all();
+    const del = db.prepare("DELETE FROM allocations WHERE id = ?");
+
+    const tx = db.transaction(() => {
+      // Add: numbers in IMS but not in DB at all
+      for (const n of nums) {
+        if (exists.get(n.phone_number)) { kept++; continue; }
+        ins.run(sysUser.id, n.phone_number, null, n.operator || null);
+        added++;
+      }
+      // Remove: pool numbers that IMS no longer has
+      for (const r of poolRows) {
+        if (!live.has(r.phone_number)) {
+          del.run(r.id);
+          removed++;
+        }
+      }
+    });
+    tx();
+
+    status.numbersScrapedTotal += nums.length;
+    status.numbersAddedTotal += added;
+    status.lastScrapeAt = Math.floor(Date.now() / 1000);
+    status.lastScrapeOk = true;
+
+    const summary = `Live-sync: +${added} added · -${removed} removed · ${kept} kept · ${nums.length} live in IMS`;
+    console.log(`[ims-bot] ${summary}`);
+    logEvent('success', summary, { ranges: [...liveRanges] });
+
+    return {
+      ok: true,
+      added, removed, kept,
+      scraped: nums.length,
+      ranges: [...liveRanges],
+    };
+  } catch (e) {
+    status.lastError = e.message;
+    status.lastErrorAt = Math.floor(Date.now() / 1000);
+    logEvent('error', 'Live-sync failed: ' + e.message);
+    return { ok: false, error: e.message };
+  } finally {
+    busy = false;
+  }
+}
+
+module.exports = { start, stop, restart, tick, scrapeNow, syncLive, solveCaptchaText, getStatus, logEvent };
+

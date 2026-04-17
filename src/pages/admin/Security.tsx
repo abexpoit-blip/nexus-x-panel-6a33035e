@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/StatCard";
 import {
   Shield, UserX, UserCheck, AlertTriangle, Eye, UserPlus, Power,
-  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench, ShieldAlert,
+  ScrollText, Monitor, LogOut, Smartphone, Globe, Search, Wrench, ShieldAlert, KeyRound,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { GradientMesh, PageHeader, PremiumKpiCard } from "@/components/premium";
 import { api } from "@/lib/api";
+import { ChangePasswordCard } from "@/components/ChangePasswordCard";
 
 const actionColor = (action: string) => {
   if (/login/i.test(action)) return "text-neon-cyan";
@@ -34,7 +35,7 @@ const parseUA = (ua: string) => {
 
 const AdminSecurity = () => {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"audit" | "sessions" | "impersonation" | "settings" | "maintenance">("audit");
+  const [tab, setTab] = useState<"audit" | "sessions" | "impersonation" | "settings" | "maintenance" | "password">("audit");
   const [auditSearch, setAuditSearch] = useState("");
   const [auditCategory, setAuditCategory] = useState<"all" | "pool_cleanup" | "ims_bot" | "auth" | "agents" | "settings">("all");
   const { signupEnabled, setSignupEnabled, maintenanceMode, maintenanceMessage, setMaintenanceMode } = useAuth();
@@ -86,6 +87,7 @@ const AdminSecurity = () => {
     { key: "impersonation" as const, label: "Impersonation", icon: ShieldAlert, count: impersonations.length },
     { key: "settings" as const, label: "Registration", icon: UserPlus },
     { key: "maintenance" as const, label: "Maintenance", icon: Wrench },
+    { key: "password" as const, label: "Password", icon: KeyRound },
   ];
 
   return (
@@ -414,6 +416,8 @@ const AdminSecurity = () => {
           </div>
         </GlassCard>
       )}
+
+      {tab === "password" && <ChangePasswordCard />}
     </div>
   );
 };
