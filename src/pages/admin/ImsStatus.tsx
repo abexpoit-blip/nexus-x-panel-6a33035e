@@ -165,6 +165,33 @@ const AdminImsStatus = () => {
             </div>
           </div>
 
+          {/* Activity log */}
+          <div className="glass-card border border-white/[0.06] rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Activity className="w-4 h-4 text-neon-cyan" /> Recent activity
+              <span className="text-xs text-muted-foreground/60 normal-case font-normal">(last 20 events)</span>
+            </h3>
+            {s.events && s.events.length > 0 ? (
+              <div className="space-y-1 max-h-80 overflow-y-auto">
+                {s.events.map((ev, i) => (
+                  <div key={i} className="flex items-start gap-3 text-xs py-1.5 border-b border-white/[0.04] last:border-0">
+                    <span className="text-muted-foreground font-mono shrink-0 w-16">{fmtAgo(ev.ts)}</span>
+                    <span className={cn("font-semibold uppercase shrink-0 w-16",
+                      ev.level === "error" ? "text-destructive" :
+                      ev.level === "success" ? "text-neon-green" :
+                      ev.level === "warn" ? "text-neon-amber" : "text-neon-cyan"
+                    )}>{ev.level}</span>
+                    <span className="text-foreground/90 break-all">{ev.message}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Info className="w-4 h-4" /> No activity recorded yet — events will appear once the bot starts scraping.
+              </p>
+            )}
+          </div>
+
           {!s.enabled && (
             <div className="glass-card border border-neon-amber/30 rounded-xl p-4 text-sm text-muted-foreground">
               <span className="text-neon-amber font-semibold">IMS bot is disabled.</span> Set <code className="font-mono text-foreground">IMS_ENABLED=true</code> in your VPS <code className="font-mono">backend/.env</code> file and restart pm2.
