@@ -86,23 +86,22 @@ async function getToken() {
 }
 
 async function authedRequest(method, path, opts = {}) {
+  const { BASE_URL } = resolveCreds();
   const token = await getToken();
+  const client = axios.create({ baseURL: BASE_URL, timeout: 20000, headers: { 'Content-Type': 'application/json' } });
   try {
     const { data } = await client.request({
-      method,
-      url: path,
+      method, url: path,
       headers: { Authorization: `Bearer ${token}` },
       ...opts,
     });
     return data;
   } catch (e) {
-    // Token expired? Force refresh once.
     if (e?.response?.status === 401) {
       cachedToken = null;
       const fresh = await getToken();
       const { data } = await client.request({
-        method,
-        url: path,
+        method, url: path,
         headers: { Authorization: `Bearer ${fresh}` },
         ...opts,
       });
