@@ -266,7 +266,19 @@ router.post('/ims-scrape-now', async (req, res) => {
   }
 });
 
-// GET /api/admin/ims-pool-breakdown — pool size grouped by range (operator)
+// POST /api/admin/ims-sync-live — reconcile pool with IMS panel reality
+// Adds numbers IMS has, removes pool numbers IMS no longer shows.
+// Active/received/expired allocations are NEVER touched.
+router.post('/ims-sync-live', async (req, res) => {
+  try {
+    const { syncLive } = require('../workers/imsBot');
+    const result = await syncLive();
+    logFromReq(req, 'ims_sync_live', { meta: result });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 router.get('/ims-pool-breakdown', (req, res) => {
   const ranges = db.prepare(`
     SELECT
