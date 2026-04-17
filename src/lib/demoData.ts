@@ -172,12 +172,28 @@ export const demoData = {
   providers: () => ({
     providers: PROVIDERS.map(id => ({ id, name: id.replace("_", " ").toUpperCase() })),
   }),
-  countries: () => ({ countries: COUNTRY_CATALOG.map(({ id, name, code }) => ({ id, name, code })) }),
+  countries: () => ({
+    countries: COUNTRY_CATALOG.map(({ id, name, code, flag, price }) => ({
+      id, name: `${flag} ${name} (+${code})`, code, flag, price_bdt: price,
+    })),
+  }),
   operators: (countryId?: number) => {
     const c = COUNTRY_CATALOG.find(x => x.id === countryId);
     const ops = c?.operators ?? ["Any"];
-    return { operators: ops.map((name, i) => ({ id: i + 1, name })) };
+    const base = c?.price ?? 10;
+    return {
+      operators: ops.map((name, i) => ({
+        id: i + 1,
+        name,
+        price_bdt: name === "Any" ? base : base + (i % 3),
+      })),
+    };
   },
+  pricing: () => ({
+    pricing: COUNTRY_CATALOG.map(({ id, name, code, flag, price, operators }) => ({
+      id, name, code, flag, price_bdt: price, operator_count: operators.length,
+    })),
+  }),
   getNumber: (countryId?: number, operatorId?: number) => {
     const c = COUNTRY_CATALOG.find(x => x.id === countryId);
     const opName = c?.operators?.[(operatorId ?? 1) - 1] || "Any";
