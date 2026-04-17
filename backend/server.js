@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
@@ -14,21 +15,50 @@ const app = express();
 // Trust proxy (nginx) so req.ip is the real client IP
 app.set('trust proxy', 1);
 
-// Middleware
+// Security headers (helmet)
+app.use(helmet({
+  contentSecurityPolicy: false,             // SPA + external CDNs — handled by nginx
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+
+// CORS — explicit allow-list in production
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : null;
+
+if (process.env.NODE_ENV === 'production' && !corsOrigins) {
+  console.error('FATAL: CORS_ORIGIN env var required in production (comma-separated origins).');
+  process.exit(1);
+}
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
+  origin: corsOrigins || true,
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+
+app.use(express.json({ limit: '256kb' }));   // tighter body cap
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// Rate limiter on all /api routes
+// Global rate limiter
 app.use('/api', rateLimit({
-  windowMs: +(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  windowMs: +(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   max: +(process.env.RATE_LIMIT_MAX || 120),
   standardHeaders: true,
   legacyHeaders: false,
+  message: { error: 'Too many requests, slow down.' },
 }));
+
+// Strict limiter on auth endpoints (brute force protection)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,                    // 15 minutes
+  max: 10,                                  // 10 login/register attempts per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,             // only count failures
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' },
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -46,17 +76,20 @@ app.get('/api/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
 // 404
 app.use('/api', (_, res) => res.status(404).json({ error: 'Not found' }));
 
-// Error handler
+// Error handler — never leak stack traces in production
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message || 'Internal server error' });
+  const safeMsg = process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : (err.message || 'Internal server error');
+  res.status(err.status || 500).json({ error: safeMsg });
 });
 
 const PORT = +(process.env.PORT || 4000);
 app.listen(PORT, () => {
   console.log(`\n🚀 NexusX backend listening on http://localhost:${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   CORS origin: ${process.env.CORS_ORIGIN || '(allow all)'}\n`);
+  console.log(`   CORS origin: ${corsOrigins ? corsOrigins.join(', ') : '(allow all — dev only)'}\n`);
 
   // Start OTP poller (AccHub auto polling) after server is up
   require('./workers/otpPoller').start();
