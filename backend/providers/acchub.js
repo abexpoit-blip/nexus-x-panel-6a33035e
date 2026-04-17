@@ -253,11 +253,17 @@ module.exports = {
     };
     if (!configured) { out.lastError = 'ACCHUB_USERNAME / ACCHUB_PASSWORD not set (use Providers page Edit)'; return out; }
     try {
+      // Force a login attempt so we know creds work
+      await getToken();
       const b = await this.getBalance();
       out.balance = b.balance;
       out.currency = b.currency;
-      if (b.error) out.lastError = b.error;
-      else if (cachedToken) lastLoginError = null;
+      out.loggedIn = !!cachedToken;
+      // Balance endpoint missing is NOT a login error — clear lastError if login succeeded
+      if (cachedToken) {
+        lastLoginError = null;
+        out.lastError = null;
+      }
     } catch (e) {
       out.lastError = e.message || String(e);
     }
