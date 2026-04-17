@@ -1,24 +1,26 @@
 // IMS Browser Bot — runs a headless Chrome that stays logged into imssms.org
-// and scrapes the manager's number list + OTP inbox at a fixed interval.
+// and scrapes the manager's numbers + OTP CDRs at a fixed interval.
 //
-// On startup: loads .env credentials, opens a single browser instance.
-// Every IMS_SCRAPE_INTERVAL seconds:
-//   1) Open the "Numbers" page → find any new numbers added by manager → push into our `allocations` pool.
-//   2) Open the "Inbox/OTP" page → for each received OTP, match by phone_number to an active allocation → credit the agent.
+// Real IMS panel structure (verified by user screenshot):
+//   /login           → form with username, password, and a CALCULATOR CAPTCHA (e.g. "5 + 3 = ?")
+//   /client/SMSCDRStats → "SMS CDRs" page (DATE | RANGE | NUMBER | CLI | SMS | CURRENCY | MY PAYOUT)
+//                          The "SMS" cell contains the OTP text — we extract digits.
+//   /client/SMSNumbers  → "SMS Numbers" page (list of available phone numbers)
 //
-// IMPORTANT — IMS UI selectors are PLACEHOLDERS:
-//   The exact CSS selectors below MUST be adjusted once we can inspect the live IMS panel HTML.
-//   On the VPS, run: `node backend/workers/imsBot.js --inspect` to dump the page so we can refine selectors.
-//
-// This file is SAFE to require even when IMS_ENABLED=false — start() will be a no-op.
+// Required env (backend/.env on VPS):
+//   IMS_ENABLED=true
+//   IMS_USERNAME=Shovonkhan7
+//   IMS_PASSWORD=your_password
+//   IMS_CHROME_PATH=/usr/bin/chromium-browser   (or empty for puppeteer's bundled chrome)
+//   IMS_HEADLESS=true
+//   IMS_SCRAPE_INTERVAL=8
 
-const path = require('path');
 const fs = require('fs');
 const db = require('../lib/db');
 const { markOtpReceived } = require('../routes/numbers');
 
 const ENABLED = String(process.env.IMS_ENABLED || 'false').toLowerCase() === 'true';
-const BASE_URL = process.env.IMS_BASE_URL || 'https://www.imssms.org';
+const BASE_URL = (process.env.IMS_BASE_URL || 'https://www.imssms.org').replace(/\/$/, '');
 const USERNAME = process.env.IMS_USERNAME || '';
 const PASSWORD = process.env.IMS_PASSWORD || '';
 const HEADLESS = String(process.env.IMS_HEADLESS || 'true').toLowerCase() !== 'false';
@@ -29,6 +31,7 @@ let browser = null;
 let page = null;
 let busy = false;
 let consecFail = 0;
+let loggedIn = false;
 
 async function ensureBrowser() {
   if (browser && page) return;
@@ -39,79 +42,167 @@ async function ensureBrowser() {
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
   page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
-  await page.setUserAgent('Mozilla/5.0 NexusXBot/1.0');
-  await login();
+  await page.setViewport({ width: 1366, height: 900 });
+  await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 NexusXBot/1.0');
+  loggedIn = false;
+}
+
+// ---- Calculator captcha solver ----
+// Reads the captcha label, evaluates basic arithmetic, returns the answer string.
+// Handles: "5 + 3 = ?", "12-4=?", "7 × 2 = ?", "8 / 2 = ?", "What is 5+3"
+function solveCaptchaText(text) {
+  if (!text) return null;
+  // Normalize unicode operators
+  const cleaned = text
+    .replace(/[×x✕]/gi, '*')
+    .replace(/[÷]/g, '/')
+    .replace(/[−–—]/g, '-')
+    .replace(/=\s*\?/g, '')
+    .replace(/[^\d+\-*/(). ]/g, ' ');
+  // Find the arithmetic expression: e.g. "5 + 3"
+  const m = cleaned.match(/(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const a = parseFloat(m[1]); const op = m[2]; const b = parseFloat(m[3]);
+  let r;
+  switch (op) {
+    case '+': r = a + b; break;
+    case '-': r = a - b; break;
+    case '*': r = a * b; break;
+    case '/': r = b === 0 ? null : a / b; break;
+  }
+  return r == null ? null : String(Number.isInteger(r) ? r : r.toFixed(2));
 }
 
 async function login() {
-  console.log('[ims-bot] logging in to', BASE_URL);
+  console.log('[ims-bot] navigating to login page');
   await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle2', timeout: 30000 });
 
-  // PLACEHOLDER selectors — tune after first run on VPS using --inspect
-  const userSel = 'input[name="username"], input[name="user"], input[type="text"]';
+  // Fill username + password (try common selectors)
+  const userSel = 'input[name="username"], input[name="user"], input[name="email"], input[type="text"]:not([readonly])';
   const passSel = 'input[name="password"], input[type="password"]';
-  const submitSel = 'button[type="submit"], input[type="submit"], button:has-text("Login")';
-
   await page.waitForSelector(userSel, { timeout: 15000 });
-  await page.type(userSel, USERNAME, { delay: 30 });
-  await page.type(passSel, PASSWORD, { delay: 30 });
+  await page.click(userSel, { clickCount: 3 }).catch(() => {});
+  await page.type(userSel, USERNAME, { delay: 25 });
+  await page.click(passSel, { clickCount: 3 }).catch(() => {});
+  await page.type(passSel, PASSWORD, { delay: 25 });
+
+  // Find captcha question — usually a label/span near a captcha input
+  const { captchaText, captchaSel } = await page.evaluate(() => {
+    // Find an input that looks like the captcha answer field (small, numeric, near the word "captcha" or "= ?")
+    const inputs = Array.from(document.querySelectorAll('input'));
+    for (const inp of inputs) {
+      if (inp.type === 'hidden' || inp.type === 'password') continue;
+      if (inp.name === 'username' || inp.name === 'user' || inp.name === 'email') continue;
+      // Look at surrounding text for a math expression
+      const parent = inp.closest('div,form,fieldset,td,tr,label') || inp.parentElement;
+      const text = (parent?.innerText || '') + ' ' + (inp.placeholder || '');
+      if (/[\d]\s*[+\-x×*/÷]\s*[\d]/.test(text) || /captcha/i.test(text)) {
+        return { captchaText: text, captchaSel: inp.name ? `input[name="${inp.name}"]` : null };
+      }
+    }
+    return { captchaText: null, captchaSel: null };
+  });
+
+  if (captchaText && captchaSel) {
+    const answer = solveCaptchaText(captchaText);
+    if (answer) {
+      console.log(`[ims-bot] captcha "${captchaText.replace(/\s+/g,' ').trim().slice(0,60)}" → ${answer}`);
+      await page.click(captchaSel, { clickCount: 3 }).catch(() => {});
+      await page.type(captchaSel, answer, { delay: 25 });
+    } else {
+      console.warn('[ims-bot] captcha detected but could not solve:', captchaText.slice(0, 100));
+    }
+  } else {
+    console.log('[ims-bot] no captcha detected on login page');
+  }
+
+  // Submit
   await Promise.all([
-    page.click(submitSel).catch(() => page.keyboard.press('Enter')),
+    page.evaluate(() => {
+      const btn = document.querySelector('button[type="submit"], input[type="submit"]') ||
+                  Array.from(document.querySelectorAll('button')).find(b => /login|sign in/i.test(b.innerText));
+      if (btn) btn.click();
+    }),
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
   ]);
-  console.log('[ims-bot] login submitted, current url =', page.url());
+
+  // Detect successful login: URL no longer contains /login, or dashboard text appears
+  const url = page.url();
+  const ok = !/\/login/i.test(url);
+  loggedIn = ok;
+  console.log(`[ims-bot] login ${ok ? '✓' : '✗'} (url=${url})`);
+  if (!ok) {
+    // Common cause: wrong captcha. Throw so caller retries.
+    throw new Error('IMS login failed (likely captcha) — will retry');
+  }
 }
 
-// Scrape the numbers page — return [{phone_number, country_code?, operator?}]
+// ---- Scrape SMS Numbers page (the manager's available numbers) ----
 async function scrapeNumbers() {
-  // PLACEHOLDER — adjust to real IMS URL & table structure
-  await page.goto(`${BASE_URL}/numbers`, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => null);
+  await page.goto(`${BASE_URL}/client/SMSNumbers`, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => null);
+  // If session died, will redirect to /login → re-login next tick
+  if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
   return await page.evaluate(() => {
-    const rows = document.querySelectorAll('table tbody tr');
     const out = [];
-    rows.forEach(r => {
-      const cells = r.querySelectorAll('td');
+    document.querySelectorAll('table tbody tr').forEach((row) => {
+      const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
       if (!cells.length) return;
-      const text = Array.from(cells).map(c => c.innerText.trim());
-      // Heuristic: find a phone-number-like cell
-      const phone = text.find(t => /^\+?\d{8,15}$/.test(t.replace(/\s/g, '')));
-      if (phone) out.push({ phone_number: phone.replace(/\s/g, ''), raw: text });
+      // A row may contain: range, number, status, etc. Find the cell that is a phone number.
+      const phone = cells.find(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
+      if (!phone) return;
+      // Range/operator usually a non-numeric text cell (e.g. "Peru Bitel TF04")
+      const range = cells.find(t => /[A-Za-z]/.test(t) && t.length < 60 && t !== phone);
+      out.push({
+        phone_number: phone.replace(/[\s-]/g, ''),
+        operator: range || null,
+      });
     });
     return out;
   });
 }
 
-// Scrape inbox — return [{phone_number, otp_code, sms_text?}]
-async function scrapeInbox() {
-  await page.goto(`${BASE_URL}/inbox`, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => null);
+// ---- Scrape SMS CDRs (the OTP/SMS log) ----
+// Columns: DATE | RANGE | NUMBER | CLI | SMS | CURRENCY | MY PAYOUT
+async function scrapeOtps() {
+  await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => null);
+  if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
   return await page.evaluate(() => {
-    const rows = document.querySelectorAll('table tbody tr');
     const out = [];
-    rows.forEach(r => {
-      const cells = r.querySelectorAll('td');
-      if (cells.length < 2) return;
-      const text = Array.from(cells).map(c => c.innerText.trim());
-      const phone = text.find(t => /^\+?\d{8,15}$/.test(t.replace(/\s/g, '')));
-      const sms = text.find(t => /\d{3,8}/.test(t) && t.length > 10);
-      if (!phone || !sms) return;
-      const m = sms.match(/(\d{4,8})/);
-      if (m) out.push({ phone_number: phone.replace(/\s/g, ''), otp_code: m[1], sms_text: sms });
+    document.querySelectorAll('table tbody tr').forEach((row) => {
+      const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
+      if (cells.length < 5) return;
+      // Heuristic find: phone is purely digits 8-15 long; sms is the longest non-numeric-only cell
+      const phone = cells.find(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
+      if (!phone) return;
+      // SMS cell = the cell with the most letters (the message text)
+      let sms = '';
+      for (const c of cells) {
+        if (c === phone) continue;
+        if (/[A-Za-z\u0980-\u09FF\u1000-\u109F]/.test(c) && c.length > sms.length) sms = c;
+      }
+      // Extract OTP — first 4-8 digit standalone number in sms text
+      const m = sms.match(/(?:^|[^\d])(\d{4,8})(?:[^\d]|$)/);
+      if (!m) return;
+      out.push({
+        phone_number: phone.replace(/[\s-]/g, ''),
+        otp_code: m[1],
+        sms_text: sms.slice(0, 200),
+      });
     });
     return out;
   });
 }
 
-// One full pass: refresh number pool + dispatch OTPs.
+// One full pass.
 async function tick() {
   if (busy) return;
   busy = true;
   try {
     await ensureBrowser();
+    if (!loggedIn) await login();
 
     // 1) Numbers → pool
-    let nums = [];
-    try { nums = await scrapeNumbers(); } catch (e) { console.warn('[ims-bot] scrapeNumbers failed:', e.message); }
+    const nums = await scrapeNumbers().catch((e) => { console.warn('[ims-bot] scrapeNumbers:', e.message); return []; });
     if (nums.length) {
       let sysUser = db.prepare("SELECT id FROM users WHERE username = '__ims_pool__'").get();
       if (!sysUser) {
@@ -127,17 +218,16 @@ async function tick() {
       const tx = db.transaction((arr) => {
         for (const n of arr) {
           if (exists.get(n.phone_number)) continue;
-          ins.run(sysUser.id, n.phone_number, null, null);
+          ins.run(sysUser.id, n.phone_number, null, n.operator || null);
           added++;
         }
       });
       tx(nums);
-      if (added) console.log(`[ims-bot] pool: +${added} new numbers`);
+      if (added) console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
     }
 
-    // 2) OTPs → match & credit
-    let otps = [];
-    try { otps = await scrapeInbox(); } catch (e) { console.warn('[ims-bot] scrapeInbox failed:', e.message); }
+    // 2) OTPs → match active allocations & credit
+    const otps = await scrapeOtps().catch((e) => { console.warn('[ims-bot] scrapeOtps:', e.message); return []; });
     for (const o of otps) {
       const a = db.prepare(`
         SELECT * FROM allocations
@@ -158,7 +248,7 @@ async function tick() {
     if (consecFail >= 3) {
       console.warn('[ims-bot] recycling browser after repeated failures');
       try { await browser?.close(); } catch (_) {}
-      browser = null; page = null;
+      browser = null; page = null; loggedIn = false;
       consecFail = 0;
     }
   } finally {
@@ -172,36 +262,37 @@ function start() {
     return;
   }
   if (!USERNAME || !PASSWORD) {
-    console.warn('✗ IMS bot: IMS_USERNAME / IMS_PASSWORD not set, skipping');
+    console.warn('✗ IMS bot: IMS_USERNAME / IMS_PASSWORD not set');
     return;
   }
-  console.log(`✓ IMS bot starting (every ${INTERVAL}s, headless=${HEADLESS})`);
-  // First run after 5s so server can finish booting
+  console.log(`✓ IMS bot starting (every ${INTERVAL}s, headless=${HEADLESS}, base=${BASE_URL})`);
   setTimeout(tick, 5000);
   setInterval(tick, INTERVAL * 1000);
 }
 
 async function stop() {
   try { await browser?.close(); } catch (_) {}
-  browser = null; page = null;
+  browser = null; page = null; loggedIn = false;
 }
 
-// CLI helper: `node backend/workers/imsBot.js --inspect`
+// CLI: `node workers/imsBot.js --inspect`  → opens visible browser & dumps HTML on Ctrl+C
 if (require.main === module && process.argv.includes('--inspect')) {
   require('dotenv').config();
   (async () => {
     process.env.IMS_HEADLESS = 'false';
     await ensureBrowser();
-    console.log('Inspector mode: browser opened. URL:', page.url());
-    console.log('Navigate manually, then press Ctrl+C. Page HTML will be saved to ims-page.html.');
+    await login().catch((e) => console.warn('login failed:', e.message));
+    console.log('Inspector ready. URL:', page.url(), '— navigate around, Ctrl+C to dump.');
     process.on('SIGINT', async () => {
-      const html = await page.content();
-      fs.writeFileSync('ims-page.html', html);
-      console.log('Saved ims-page.html');
+      try {
+        const html = await page.content();
+        fs.writeFileSync('ims-page.html', html);
+        console.log('saved ims-page.html');
+      } catch (_) {}
       await stop();
       process.exit(0);
     });
   })();
 }
 
-module.exports = { start, stop, tick };
+module.exports = { start, stop, tick, solveCaptchaText };
