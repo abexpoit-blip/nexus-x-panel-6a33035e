@@ -184,6 +184,31 @@ const AdminDashboard = () => {
         </PremiumChartCard>
       </div>
 
+      {/* Commission Trend — daily commission credited to agents */}
+      <PremiumChartCard
+        title="Commission Paid to Agents"
+        description="Last 14 days · BDT credited per successful OTP"
+        variant="highlighted"
+        legend={[{ label: "Daily commission", color: "hsl(300 100% 55%)" }]}
+        actions={
+          <Badge variant="outline" className="glass-strong gap-1.5 border-neon-magenta/30 text-neon-magenta">
+            <Coins className="w-3 h-3" />
+            <span className="text-[10px] uppercase tracking-wider">
+              Today: ৳{(s.todayCommission ?? 0).toLocaleString()}
+            </span>
+          </Badge>
+        }
+      >
+        {(commTrend?.series?.length ?? 0) === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <Coins className="w-10 h-10 text-muted-foreground/30 mb-2" />
+            <p className="text-xs text-muted-foreground">No commission data yet</p>
+          </div>
+        ) : (
+          <CommissionArea data={commTrend!.series.map(p => ({ label: p.label, value: p.value }))} height={260} />
+        )}
+      </PremiumChartCard>
+
       {/* Top agents leaderboard */}
       <PremiumChartCard
         title="Top Performing Agents"
