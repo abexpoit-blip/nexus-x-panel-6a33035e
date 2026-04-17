@@ -118,12 +118,12 @@ const AgentDashboard = () => {
 
         <GlassCard className="p-6">
           <h3 className="font-display font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-neon-amber" /> This Period
+            <Activity className="w-4 h-4 text-neon-amber" /> Earnings This Period
           </h3>
           <div className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Today spent</span><span className="font-bold text-neon-green">৳{s.today.s.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">7-day spent</span><span className="font-bold">৳{s.week.s.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">30-day spent</span><span className="font-bold">৳{s.month.s.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Today earned</span><span className="font-bold text-neon-green">+৳{s.today.s.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">7-day earned</span><span className="font-bold text-neon-green">+৳{s.week.s.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">30-day earned</span><span className="font-bold text-neon-green">+৳{s.month.s.toFixed(2)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">30-day OTPs</span><span className="font-bold">{s.month.c}</span></div>
           </div>
         </GlassCard>
