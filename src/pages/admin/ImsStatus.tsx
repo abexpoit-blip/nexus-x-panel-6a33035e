@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type ImsStatus = {
   enabled: boolean;
@@ -23,6 +25,7 @@ type ImsStatus = {
   poolSize: number;
   activeAssigned: number;
   otpReceived: number;
+  events?: { ts: number; level: string; message: string; meta: unknown }[];
 };
 
 const fmtAgo = (ts: number | null) => {
@@ -55,12 +58,27 @@ const Stat = ({ icon, label, value, hint, accent }: {
 );
 
 const AdminImsStatus = () => {
+  const [restarting, setRestarting] = useState(false);
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["ims-status"],
     queryFn: () => api.admin.imsStatus(),
     refetchInterval: 5000,
   });
   const s = data?.status as ImsStatus | undefined;
+
+  const handleRestart = async () => {
+    if (!confirm("Restart the IMS bot? Current scrape will be interrupted.")) return;
+    setRestarting(true);
+    try {
+      await api.admin.imsRestart();
+      toast.success("Bot restart initiated");
+      setTimeout(() => refetch(), 2000);
+    } catch (e) {
+      toast.error("Restart failed: " + (e as Error).message);
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   return (
     <div className="relative space-y-6">
@@ -71,12 +89,21 @@ const AdminImsStatus = () => {
         description="Headless browser scraper running on the VPS — live numbers + OTP delivery"
         icon={<Bot className="w-5 h-5 text-neon-magenta" />}
         actions={
-          <button
-            onClick={() => refetch()}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition"
-          >
-            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRestart}
+              disabled={restarting}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
+            >
+              <Power className={cn("w-3.5 h-3.5", restarting && "animate-spin")} /> {restarting ? "Restarting…" : "Restart Bot"}
+            </button>
+            <button
+              onClick={() => refetch()}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} /> Refresh
+            </button>
+          </div>
         }
       />
 
@@ -136,6 +163,33 @@ const AdminImsStatus = () => {
                 <p className="text-sm text-muted-foreground">No errors recorded ✓</p>
               )}
             </div>
+          </div>
+
+          {/* Activity log */}
+          <div className="glass-card border border-white/[0.06] rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Activity className="w-4 h-4 text-neon-cyan" /> Recent activity
+              <span className="text-xs text-muted-foreground/60 normal-case font-normal">(last 20 events)</span>
+            </h3>
+            {s.events && s.events.length > 0 ? (
+              <div className="space-y-1 max-h-80 overflow-y-auto">
+                {s.events.map((ev, i) => (
+                  <div key={i} className="flex items-start gap-3 text-xs py-1.5 border-b border-white/[0.04] last:border-0">
+                    <span className="text-muted-foreground font-mono shrink-0 w-16">{fmtAgo(ev.ts)}</span>
+                    <span className={cn("font-semibold uppercase shrink-0 w-16",
+                      ev.level === "error" ? "text-destructive" :
+                      ev.level === "success" ? "text-neon-green" :
+                      ev.level === "warn" ? "text-neon-amber" : "text-neon-cyan"
+                    )}>{ev.level}</span>
+                    <span className="text-foreground/90 break-all">{ev.message}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground flex items-center gap-2">
+                <Info className="w-4 h-4" /> No activity recorded yet — events will appear once the bot starts scraping.
+              </p>
+            )}
           </div>
 
           {!s.enabled && (

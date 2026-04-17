@@ -51,16 +51,36 @@ const status = {
   baseUrl: '',
   intervalSec: 0,
 };
+
+// Ring buffer of recent scrape activity (last 20 events)
+const events = [];
+function logEvent(level, message, meta) {
+  events.unshift({ ts: Math.floor(Date.now() / 1000), level, message, meta: meta || null });
+  if (events.length > 20) events.length = 20;
+}
+
 function getStatus() {
-  // Augment with live DB counts every read
   try {
     const poolSize = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='pool'").get().c;
     const activeAssigned = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='active'").get().c;
     const otpReceived = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='received'").get().c;
-    return { ...status, poolSize, activeAssigned, otpReceived };
+    return { ...status, poolSize, activeAssigned, otpReceived, events: events.slice() };
   } catch (_) {
-    return { ...status, poolSize: 0, activeAssigned: 0, otpReceived: 0 };
+    return { ...status, poolSize: 0, activeAssigned: 0, otpReceived: 0, events: events.slice() };
   }
+}
+
+async function restart() {
+  logEvent('info', 'Restart requested by admin');
+  await stop();
+  consecFail = 0;
+  status.lastError = null;
+  status.lastErrorAt = null;
+  setTimeout(() => {
+    try { start(); logEvent('success', 'Bot restarted'); }
+    catch (e) { logEvent('error', 'Restart failed: ' + e.message); }
+  }, 1000);
+  return true;
 }
 
 async function ensureBrowser() {
@@ -257,7 +277,10 @@ async function tick() {
       tx(nums);
       status.numbersScrapedTotal += nums.length;
       status.numbersAddedTotal += added;
-      if (added) console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
+      if (added) {
+        console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
+        logEvent('success', `Pool +${added} new numbers`, { scraped: nums.length });
+      }
     }
 
     // 2) OTPs → match active allocations & credit
@@ -272,6 +295,7 @@ async function tick() {
         await markOtpReceived(a, o.otp_code);
         status.otpsDeliveredTotal++;
         console.log(`[ims-bot] OTP delivered: ${o.phone_number} → ${o.otp_code} (alloc#${a.id})`);
+        logEvent('success', `OTP delivered to ${o.phone_number}`, { otp: o.otp_code, alloc: a.id });
       }
     }
 
@@ -287,8 +311,10 @@ async function tick() {
     status.lastErrorAt = Math.floor(Date.now() / 1000);
     status.lastScrapeOk = false;
     console.error('[ims-bot] tick failed:', e.message);
+    logEvent('error', 'Scrape failed: ' + e.message);
     if (consecFail >= 3) {
       console.warn('[ims-bot] recycling browser after repeated failures');
+      logEvent('warn', 'Recycling browser after 3 consecutive failures');
       try { await browser?.close(); } catch (_) {}
       browser = null; page = null; loggedIn = false;
       status.loggedIn = false;
@@ -345,4 +371,4 @@ if (require.main === module && process.argv.includes('--inspect')) {
   })();
 }
 
-module.exports = { start, stop, tick, solveCaptchaText, getStatus };
+module.exports = { start, stop, restart, tick, solveCaptchaText, getStatus, logEvent };
