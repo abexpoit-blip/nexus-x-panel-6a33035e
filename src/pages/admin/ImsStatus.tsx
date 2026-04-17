@@ -142,6 +142,32 @@ const AdminImsStatus = () => {
             <Pill ok={s.lastScrapeOk} label={s.lastScrapeOk ? "Last scrape OK" : "Last scrape failed"} />
           </div>
 
+          {/* Auto-pause meter */}
+          {(s.emptyLimit ?? 0) > 0 && (
+            <div className="glass-card border border-white/[0.06] rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-neon-amber" /> Auto-pause guard
+                </span>
+                <span className="text-xs font-mono text-muted-foreground">
+                  {s.emptyStreak ?? 0} / {s.emptyLimit} empty scrapes
+                </span>
+              </div>
+              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
+                <div
+                  className={cn("h-full transition-all duration-500",
+                    (s.emptyStreak ?? 0) >= (s.emptyLimit ?? 10) * 0.7 ? "bg-destructive" :
+                    (s.emptyStreak ?? 0) >= (s.emptyLimit ?? 10) * 0.4 ? "bg-neon-amber" : "bg-neon-green"
+                  )}
+                  style={{ width: `${Math.min(100, ((s.emptyStreak ?? 0) / (s.emptyLimit ?? 10)) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Bot will auto-stop and notify admins if {s.emptyLimit} consecutive scrapes return zero numbers (saves VPS resources when IMS has no stock).
+              </p>
+            </div>
+          )}
+
           {/* Stats grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Stat icon={<CheckCircle2 className="w-3.5 h-3.5" />} label="Last login" value={fmtAgo(s.lastLoginAt)}
