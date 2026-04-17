@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
-import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw } from "lucide-react";
+import { Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText, AlertTriangle, RefreshCw, Power, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type ImsStatus = {
   enabled: boolean;
@@ -23,6 +25,7 @@ type ImsStatus = {
   poolSize: number;
   activeAssigned: number;
   otpReceived: number;
+  events?: { ts: number; level: string; message: string; meta: unknown }[];
 };
 
 const fmtAgo = (ts: number | null) => {
