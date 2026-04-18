@@ -708,8 +708,10 @@ async function pollOtpsNow() {
       console.log(`[ims-bot] fast-poll delivered ${delivered} OTP(s)`);
     }
   } catch (e) {
-    status.lastScrapeOk = false;
-    status.lastError = e.message;
+    // Don't flip lastScrapeOk to false on a single fast-poll timeout — heavy tick owns that flag.
+    // Just record the error so admin can see it in the panel.
+    status.lastError = 'fast-poll: ' + e.message;
+    status.lastErrorAt = Math.floor(Date.now() / 1000);
     console.warn('[ims-bot] otp-poll:', e.message);
   } finally {
     otpBusy = false;
