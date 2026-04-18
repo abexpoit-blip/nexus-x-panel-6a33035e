@@ -561,6 +561,7 @@ async function scrapeNumbers() {
 // We navigate to CDR ONCE — afterwards we just call page.reload() to refresh data.
 // IMS auto-loads the CDR table on page load (no "Show Report" click needed).
 let _cdrPageReady = false;
+let _lastShowReportAt = 0;     // wall-clock ms of last successful Show Report click — used to enforce IMS's 15s minimum interval
 
 async function scrapeOtps() {
   if (!page) throw new Error('page not ready');
