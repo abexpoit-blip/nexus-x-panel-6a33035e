@@ -70,10 +70,26 @@ router.get('/stats', (req, res) => {
   ).get().s;
   const pendingWithdrawals = db.prepare("SELECT COUNT(*) c FROM withdrawals WHERE status = 'pending'").get().c;
 
+  // 24h OTP success/expired stats — measured against allocations (not CDR) so
+  // expired numbers are counted. delivered = status='received', expired = 'expired'.
+  const since24h = Math.floor(Date.now() / 1000) - 86400;
+  const delivered24h = db.prepare(
+    "SELECT COUNT(*) c FROM allocations WHERE status='received' AND allocated_at >= ?"
+  ).get(since24h).c;
+  const expired24h = db.prepare(
+    "SELECT COUNT(*) c FROM allocations WHERE status='expired' AND allocated_at >= ?"
+  ).get(since24h).c;
+  const released24h = db.prepare(
+    "SELECT COUNT(*) c FROM allocations WHERE status='released' AND allocated_at >= ?"
+  ).get(since24h).c;
+  const total24h = delivered24h + expired24h + released24h;
+  const successRate24h = total24h > 0 ? +((delivered24h / total24h) * 100).toFixed(1) : 0;
+
   res.json({
     totalAgents, activeAgents, totalAlloc, activeAlloc,
     totalOtp, todayOtp, todayRevenue, totalRevenue,
     todayCommission, totalCommission, pendingWithdrawals,
+    delivered24h, expired24h, released24h, total24h, successRate24h,
   });
 });
 
