@@ -13,6 +13,7 @@ import {
   Copy, Check, CalendarIcon, Download, X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { cliBadgeClass } from "@/lib/cliBadge";
 import { toast } from "sonner";
 
 // Permanent record of EVERY successful OTP this agent has ever delivered.
@@ -215,6 +216,15 @@ const AgentHistory = () => {
             key: "operator",
             header: "Operator",
             render: (r) => <span className="text-muted-foreground text-xs">{r.operator || "—"}</span>,
+          },
+          {
+            key: "cli",
+            header: "Service",
+            render: (r) => r.cli ? (
+              <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold inline-block", cliBadgeClass(r.cli))}>
+                {r.cli}
+              </span>
+            ) : <span className="text-muted-foreground text-xs">—</span>,
           },
           {
             key: "otp_code",

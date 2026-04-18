@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS allocations (
   operator TEXT,
   phone_number TEXT NOT NULL,
   otp TEXT,
+  cli TEXT,                                   -- service/CLI tag (Facebook, WhatsApp, Telegram, etc.)
   status TEXT NOT NULL DEFAULT 'active',      -- 'active' | 'received' | 'expired' | 'released'
   price_bdt REAL DEFAULT 0,
   allocated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS cdr (
   operator TEXT,
   phone_number TEXT NOT NULL,
   otp_code TEXT,
+  cli TEXT,                                    -- service tag (Facebook, WhatsApp, etc.)
   price_bdt REAL NOT NULL DEFAULT 0,           -- what we charge / pay agent
   status TEXT NOT NULL DEFAULT 'billed',       -- 'billed' | 'refunded' | 'failed'
   note TEXT,

@@ -30,18 +30,13 @@ router.get('/mine', authRequired, (req, res) => {
 // actively receiving OTPs right now and pick hot ranges in Get Number.
 router.get('/feed', authRequired, (req, res) => {
   const rows = db.prepare(`
-    SELECT id, phone_number, otp_code, operator, country_code,
+    SELECT id, phone_number, otp_code, operator, country_code, cli,
            provider, price_bdt, created_at
     FROM cdr
     WHERE otp_code IS NOT NULL
     ORDER BY created_at DESC
     LIMIT 200
   `).all();
-  // Mask sensitive bits before sending — server-side, so the raw OTP never
-  // leaves the box for non-owners.
-  // Hide LAST 4 digits (e.g. 517896XXXX) — preserves country/operator prefix
-  // so agents can recognise the range, hides the unique tail so no one can
-  // dial or hijack another agent's number.
   const maskPhone = (p) => {
     if (!p) return '';
     if (p.length <= 4) return 'X'.repeat(p.length);
@@ -53,6 +48,7 @@ router.get('/feed', authRequired, (req, res) => {
     otp_length: r.otp_code ? r.otp_code.length : 0,
     operator: r.operator,
     country_code: r.country_code,
+    cli: r.cli || null,
     provider: r.provider,
     created_at: r.created_at,
   }));

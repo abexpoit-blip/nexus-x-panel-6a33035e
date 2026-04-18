@@ -239,6 +239,7 @@ export type Rate = {
 export type CDR = {
   id: number; user_id: number; username?: string; provider: string;
   country_code?: string; operator?: string; phone_number: string; otp_code?: string;
+  cli?: string | null;
   price_bdt: number; status: string; note?: string; created_at: number;
 };
 export type Payment = {
@@ -308,6 +309,7 @@ export const api = {
       rows: Array<{
         id: number; allocation_id: number | null; country_code: string | null;
         operator: string | null; phone_number: string; otp_code: string;
+        cli: string | null;
         price_bdt: number; created_at: number;
       }>;
       page: number; page_size: number; total: number; total_pages: number;
@@ -368,6 +370,7 @@ export const api = {
     feed: () => request<{ feed: Array<{
       id: number; phone_masked: string; otp_length: number;
       operator: string | null; country_code: string | null;
+      cli: string | null;
       provider: string | null; created_at: number;
     }> }>("/cdr/feed"),
     refund: (id: number, note?: string) => request(`/cdr/${id}/refund`, { method: "POST", body: JSON.stringify({ note }) }),
