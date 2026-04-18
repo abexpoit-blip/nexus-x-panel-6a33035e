@@ -281,6 +281,7 @@ export const api = {
 
   // Numbers
   providers: () => request<{ providers: { id: string; name: string }[] }>("/numbers/providers"),
+  numbersConfig: () => request<{ otp_expiry_sec: number }>("/numbers/config"),
   countries: (provider: string) => request<{ countries: any[] }>(`/numbers/countries/${provider}`),
   operators: (provider: string, countryId: number) =>
     request<{ operators: any[] }>(`/numbers/operators/${provider}/${countryId}`),
