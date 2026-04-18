@@ -769,8 +769,14 @@ async function scrapeOtps() {
     });
     return out;
   });
-  _step(`done — extracted ${out.length} rows`);
-  return out;
+    _step(`done — extracted ${out.length} rows`);
+    return out;
+  })();
+  try {
+    return await _scrapeInFlight;
+  } finally {
+    _scrapeInFlight = null;
+  }
 }
 
 // One full pass.
