@@ -387,42 +387,47 @@ async function scrapeNumbers() {
 // IMS shows newest entries first (sorted by DATE desc) — we preserve that order
 // so the latest OTP wins when the same number appears multiple times.
 async function scrapeOtps() {
-  // Use 'domcontentloaded' instead of 'networkidle2' — IMS pages have constant AJAX
-  // polling so networkidle never fires, causing 25s timeouts on every scrape.
-  await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
+  // Use 'domcontentloaded' — IMS pages do constant AJAX polling so networkidle never fires.
+  // If goto fails outright, throw so caller recycles the page (don't silently scrape stale DOM).
+  try {
+    await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 12000 });
+  } catch (e) {
+    throw new Error('CDR page navigation failed: ' + e.message);
+  }
   if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
 
-  // CRITICAL: IMS SMSCDRStats page renders an EMPTY table by default —
-  // the user must click "Show Report" to populate it. Without this click,
-  // the bot scrapes 0 rows forever and no OTPs ever get delivered.
-  // We click it on every visit (fresh data each tick).
+  // CRITICAL: IMS SMSCDRStats renders an EMPTY table by default — must click "Show Report".
+  // Wait for any button/form to mount first.
+  try { await page.waitForSelector('button, input[type=submit], form', { timeout: 4000 }); } catch (_) {}
+
+  let clicked = null;
   try {
-    // Click "Show Report" — try multiple selectors (button text, value, jQuery onclick, etc)
-    const clicked = await page.evaluate(() => {
+    clicked = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll('button, input[type=submit], input[type=button], a, [role=button]'));
       const target = all.find(b => /show\s*report|search|filter|submit|refresh/i.test((b.innerText || b.value || b.title || '').trim()));
-      if (target) { target.click(); return (target.innerText || target.value || '').trim(); }
-      // Fallback: try submitting any form on the page
+      if (target) { target.click(); return (target.innerText || target.value || '').trim() || 'clicked'; }
       const form = document.querySelector('form');
       if (form) { form.submit(); return 'form-submit'; }
       return null;
     });
-    // Give DataTables/AJAX time to fetch + render. IMS server is slow — 5s baseline.
-    await new Promise(r => setTimeout(r, 2500));
-    // Then poll for actual data rows (not "no data" placeholder).
-    await page.waitForFunction(
-      () => {
-        const rows = document.querySelectorAll('table tbody tr');
-        if (!rows.length) return false;
-        const first = (rows[0].innerText || '').toLowerCase();
-        if (rows.length === 1 && /no data|empty|no record/i.test(first)) return false;
-        // Need at least one row with a phone-number-looking cell
-        return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
-      },
-      { timeout: 8000 }
-    ).catch(() => null);
-    if (!clicked) console.log('[ims-bot] WARNING: Show Report button not found on CDR page');
-  } catch (_) { /* non-fatal — fall through and try to read whatever is there */ }
+  } catch (_) {}
+
+  // Short fixed wait for AJAX to fire (IMS DataTables ~600ms response).
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Then poll briefly for actual data rows. Hard cap 5s (was 8s) to keep total under 20s.
+  await page.waitForFunction(
+    () => {
+      const rows = document.querySelectorAll('table tbody tr');
+      if (!rows.length) return false;
+      const first = (rows[0].innerText || '').toLowerCase();
+      if (rows.length === 1 && /no data|empty|no record/i.test(first)) return false;
+      return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
+    },
+    { timeout: 5000 }
+  ).catch(() => null);
+
+  if (!clicked) dwarn('[ims-bot] Show Report button not found on CDR page');
 
   return await page.evaluate(() => {
     const out = [];
@@ -514,7 +519,7 @@ async function tick() {
     // a single hung evaluate() blocks every subsequent tick forever.
     await Promise.race([
       deliverOtps(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('deliverOtps timeout 30s')), 30000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('deliverOtps timeout 20s')), 20000)),
     ]);
     const nums = []; // numbers scrape disabled — see above. Set empty so auto-pause logic works.
     // Auto-pause disabled — numbers scrape removed, so empty-streak no longer applies.
@@ -553,9 +558,9 @@ async function tick() {
     status.lastScrapeOk = false;
     console.error('[ims-bot] tick failed:', e.message);
     logEvent('error', 'Scrape failed: ' + e.message);
-    if (consecFail >= 3) {
+    if (consecFail >= 2) {
       console.warn('[ims-bot] recycling browser after repeated failures');
-      logEvent('warn', 'Recycling browser after 3 consecutive failures');
+      logEvent('warn', 'Recycling browser after 2 consecutive failures');
       try { await browser?.close(); } catch (_) {}
       browser = null; page = null; loggedIn = false;
       status.loggedIn = false;
@@ -695,7 +700,7 @@ async function pollOtpsNow() {
   try {
     const delivered = await Promise.race([
       deliverOtps(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('fast-poll timeout 25s')), 25000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('fast-poll timeout 18s')), 18000)),
     ]);
     status.lastScrapeAt = Math.floor(Date.now() / 1000);
     status.lastScrapeOk = true;
@@ -703,8 +708,10 @@ async function pollOtpsNow() {
       console.log(`[ims-bot] fast-poll delivered ${delivered} OTP(s)`);
     }
   } catch (e) {
-    status.lastScrapeOk = false;
-    status.lastError = e.message;
+    // Don't flip lastScrapeOk to false on a single fast-poll timeout — heavy tick owns that flag.
+    // Just record the error so admin can see it in the panel.
+    status.lastError = 'fast-poll: ' + e.message;
+    status.lastErrorAt = Math.floor(Date.now() / 1000);
     console.warn('[ims-bot] otp-poll:', e.message);
   } finally {
     otpBusy = false;
