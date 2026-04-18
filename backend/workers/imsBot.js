@@ -60,6 +60,8 @@ let scrapeTimer = null;     // for graceful stop
 let otpTimer = null;        // fast OTP-only poll loop
 const EMPTY_LIMIT = +(process.env.IMS_EMPTY_LIMIT || 10);
 let lastLowPoolAlertAt = 0;   // unix seconds — debounce low-pool notifications
+let _cookieFailStreak = 0;    // consecutive cookie-auth failures (resets on success)
+let _lastCookieExpiryAlertAt = 0; // debounce cookie-expiry alerts (1 per 6h)
 
 // Live status (read by /api/admin/ims-status)
 const status = {
