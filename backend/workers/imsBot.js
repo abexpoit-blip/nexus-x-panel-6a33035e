@@ -387,42 +387,47 @@ async function scrapeNumbers() {
 // IMS shows newest entries first (sorted by DATE desc) — we preserve that order
 // so the latest OTP wins when the same number appears multiple times.
 async function scrapeOtps() {
-  // Use 'domcontentloaded' instead of 'networkidle2' — IMS pages have constant AJAX
-  // polling so networkidle never fires, causing 25s timeouts on every scrape.
-  await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
+  // Use 'domcontentloaded' — IMS pages do constant AJAX polling so networkidle never fires.
+  // If goto fails outright, throw so caller recycles the page (don't silently scrape stale DOM).
+  try {
+    await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 12000 });
+  } catch (e) {
+    throw new Error('CDR page navigation failed: ' + e.message);
+  }
   if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
 
-  // CRITICAL: IMS SMSCDRStats page renders an EMPTY table by default —
-  // the user must click "Show Report" to populate it. Without this click,
-  // the bot scrapes 0 rows forever and no OTPs ever get delivered.
-  // We click it on every visit (fresh data each tick).
+  // CRITICAL: IMS SMSCDRStats renders an EMPTY table by default — must click "Show Report".
+  // Wait for any button/form to mount first.
+  try { await page.waitForSelector('button, input[type=submit], form', { timeout: 4000 }); } catch (_) {}
+
+  let clicked = null;
   try {
-    // Click "Show Report" — try multiple selectors (button text, value, jQuery onclick, etc)
-    const clicked = await page.evaluate(() => {
+    clicked = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll('button, input[type=submit], input[type=button], a, [role=button]'));
       const target = all.find(b => /show\s*report|search|filter|submit|refresh/i.test((b.innerText || b.value || b.title || '').trim()));
-      if (target) { target.click(); return (target.innerText || target.value || '').trim(); }
-      // Fallback: try submitting any form on the page
+      if (target) { target.click(); return (target.innerText || target.value || '').trim() || 'clicked'; }
       const form = document.querySelector('form');
       if (form) { form.submit(); return 'form-submit'; }
       return null;
     });
-    // Give DataTables/AJAX time to fetch + render. IMS server is slow — 5s baseline.
-    await new Promise(r => setTimeout(r, 2500));
-    // Then poll for actual data rows (not "no data" placeholder).
-    await page.waitForFunction(
-      () => {
-        const rows = document.querySelectorAll('table tbody tr');
-        if (!rows.length) return false;
-        const first = (rows[0].innerText || '').toLowerCase();
-        if (rows.length === 1 && /no data|empty|no record/i.test(first)) return false;
-        // Need at least one row with a phone-number-looking cell
-        return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
-      },
-      { timeout: 8000 }
-    ).catch(() => null);
-    if (!clicked) console.log('[ims-bot] WARNING: Show Report button not found on CDR page');
-  } catch (_) { /* non-fatal — fall through and try to read whatever is there */ }
+  } catch (_) {}
+
+  // Short fixed wait for AJAX to fire (IMS DataTables ~600ms response).
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Then poll briefly for actual data rows. Hard cap 5s (was 8s) to keep total under 20s.
+  await page.waitForFunction(
+    () => {
+      const rows = document.querySelectorAll('table tbody tr');
+      if (!rows.length) return false;
+      const first = (rows[0].innerText || '').toLowerCase();
+      if (rows.length === 1 && /no data|empty|no record/i.test(first)) return false;
+      return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
+    },
+    { timeout: 5000 }
+  ).catch(() => null);
+
+  if (!clicked) dwarn('[ims-bot] Show Report button not found on CDR page');
 
   return await page.evaluate(() => {
     const out = [];
