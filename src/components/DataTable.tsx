@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { TableSkeleton } from "./TableSkeleton";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { usePageParam } from "@/hooks/usePageParam";
 
 interface Column<T> {
   key: string;
@@ -19,6 +20,8 @@ interface DataTableProps<T> {
   emptyText?: string;
   /** Items per page. Set to 0 / null to disable pagination. Defaults to 25. */
   pageSize?: number | null;
+  /** URL query-param key for the page number. Defaults to "page". */
+  pageParam?: string;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -29,9 +32,10 @@ export function DataTable<T extends Record<string, any>>({
   loading,
   emptyText = "No data available",
   pageSize = 25,
+  pageParam = "page",
 }: DataTableProps<T>) {
-  const [page, setPage] = useState(1);
-  const usePagination = !!pageSize && pageSize > 0;
+  const [page, setPage] = usePageParam(pageParam, 1);
+  const usePag = !!pageSize && pageSize > 0;
 
   const totalPages = useMemo(
     () => (usePagination ? Math.max(1, Math.ceil(data.length / (pageSize as number))) : 1),
