@@ -144,29 +144,38 @@ async function ensureBrowser() {
 }
 
 // ---- Calculator captcha solver ----
-// Reads the captcha label, evaluates basic arithmetic, returns the answer string.
-// Handles: "5 + 3 = ?", "12-4=?", "7 × 2 = ?", "8 / 2 = ?", "What is 5+3"
+// Reads the captcha label, evaluates arithmetic, returns the answer string.
+// Handles: "5 + 3 = ?", "12-4=?", "7 × 2 = ?", "8 / 2 = ?",
+//          "What is 5+3", "5 + 3 + 2 = ?", "(4+2)*3=?", multi-line / noisy text.
+// Uses a SAFE arithmetic-only evaluator (no eval) to avoid code injection
+// since the input comes from a remote page.
 function solveCaptchaText(text) {
   if (!text) return null;
-  // Normalize unicode operators
-  const cleaned = text
-    .replace(/[×x✕]/gi, '*')
-    .replace(/[÷]/g, '/')
+  // Normalize unicode operators / spaces
+  const norm = String(text)
+    .replace(/[×x✕✖⨯·]/gi, '*')
+    .replace(/[÷⁄]/g, '/')
     .replace(/[−–—]/g, '-')
-    .replace(/=\s*\?/g, '')
-    .replace(/[^\d+\-*/(). ]/g, ' ');
-  // Find the arithmetic expression: e.g. "5 + 3"
-  const m = cleaned.match(/(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)/);
-  if (!m) return null;
-  const a = parseFloat(m[1]); const op = m[2]; const b = parseFloat(m[3]);
+    .replace(/[\u00A0\u2000-\u200B]/g, ' ');
+  // Strip the trailing "= ?" / "= ? :" / "?" so we focus on the LHS.
+  // Then try to find a contiguous arithmetic expression with 2+ operands.
+  // Examples that should match: "5 + 3", "5 + 3 + 2", "(4+2)*3", "12 - 4"
+  const lhs = norm.split(/=/)[0] || norm;
+  // Greedy: longest run of digits, ops, parens, dots, spaces.
+  const exprMatches = lhs.match(/[-+]?\s*\(?\s*\d+(?:\.\d+)?(?:\s*[+\-*/]\s*\(?\s*\d+(?:\.\d+)?\)?)+/g);
+  if (!exprMatches || !exprMatches.length) return null;
+  // Pick the LONGEST candidate (most likely the full captcha expression).
+  const expr = exprMatches.sort((a, b) => b.length - a.length)[0];
+  // Safe eval: ensure ONLY digits, operators, parens, dots, spaces remain.
+  const safe = expr.replace(/\s+/g, '');
+  if (!/^[-+]?[\d+\-*/().]+$/.test(safe)) return null;
   let r;
-  switch (op) {
-    case '+': r = a + b; break;
-    case '-': r = a - b; break;
-    case '*': r = a * b; break;
-    case '/': r = b === 0 ? null : a / b; break;
-  }
-  return r == null ? null : String(Number.isInteger(r) ? r : r.toFixed(2));
+  try {
+    // eslint-disable-next-line no-new-func
+    r = Function(`"use strict"; return (${safe});`)();
+  } catch (_) { return null; }
+  if (typeof r !== 'number' || !isFinite(r)) return null;
+  return String(Number.isInteger(r) ? r : Math.round(r * 100) / 100);
 }
 
 async function login() {
