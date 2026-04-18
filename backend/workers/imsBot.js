@@ -619,7 +619,7 @@ async function tick() {
       console.warn('[ims-bot] recycling browser after repeated failures');
       logEvent('warn', 'Recycling browser after 2 consecutive failures');
       try { await browser?.close(); } catch (_) {}
-      browser = null; page = null; loggedIn = false;
+      browser = null; page = null; loggedIn = false; _cdrPageReady = false;
       status.loggedIn = false;
       consecFail = 0;
     }
