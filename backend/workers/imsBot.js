@@ -801,7 +801,7 @@ function start() {
   // number-list scrape only runs every 60s.
   // Priority: DB setting (admin-tunable) > env var > default 10s. Clamp 3-120s.
   const dbOtpInt = +(readSetting('ims_otp_interval') || 0);
-  const envOtpInt = +(process.env.IMS_OTP_INTERVAL || 10);
+  const envOtpInt = +(process.env.IMS_OTP_INTERVAL || 5);
   let OTP_INTERVAL = dbOtpInt > 0 ? dbOtpInt : envOtpInt;
   if (OTP_INTERVAL < 3) OTP_INTERVAL = 3;
   if (OTP_INTERVAL > 120) OTP_INTERVAL = 120;
