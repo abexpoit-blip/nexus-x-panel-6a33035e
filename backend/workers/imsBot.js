@@ -130,6 +130,10 @@ async function ensureBrowser() {
   browser = await puppeteer.launch({
     headless: HEADLESS ? 'new' : false,
     executablePath: CHROME_PATH,
+    // Bumped from default 30s → 90s. Heavy CDR responses + occasional IMS
+    // server lag can exceed 30s during page.evaluate() calls, causing
+    // "Runtime.callFunctionOn timed out" + Target closed crashes.
+    protocolTimeout: 90000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -751,20 +755,12 @@ async function tick() {
     await ensureBrowser();
     if (!loggedIn) { console.log('[ims-bot] logging in…'); await login(); console.log('[ims-bot] login OK'); }
 
-    // 1) OTPs only — agents care about OTP delivery, not refilling pool every cycle.
-    // Number-list scraping is DISABLED in the heavy tick because:
-    //   • IMS My-SMS-Numbers page has 17k+ rows → pagination takes 90-180s
-    //   • That hangs the tick longer than INTERVAL → "skipped — busy" deadlock
-    //   • Pool is refilled via admin "Manual Paste" or the explicit "Sync Live" button
-    // Hard 30s cap on the OTP scrape — if puppeteer hangs (CDR page stalls, AJAX
-    // never settles, etc.) we abort and let the next tick try fresh. Without this
-    // a single hung evaluate() blocks every subsequent tick forever.
-    await Promise.race([
-      deliverOtps(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('deliverOtps timeout 60s')), 60000)),
-    ]);
-    const nums = []; // numbers scrape disabled — see above. Set empty so auto-pause logic works.
-    // Auto-pause disabled — numbers scrape removed, so empty-streak no longer applies.
+    // Heavy tick is now SESSION KEEPALIVE only — fast-poll (pollOtpsNow) owns
+    // all OTP scraping. Calling deliverOtps() here would race with fast-poll
+    // on the same browser page, triggering IMS's 15s rate-limit ("attempt is
+    // logged" warning row → populated=false on next fast-poll).
+    // Just verify session is alive — a no-op if loggedIn is true.
+    const nums = []; // numbers scrape disabled
     emptyStreak = 0;
 
     consecFail = 0;
