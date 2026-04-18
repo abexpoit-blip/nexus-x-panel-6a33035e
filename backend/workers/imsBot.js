@@ -443,9 +443,10 @@ async function scrapeOtps() {
     }
     if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
     _cdrPageReady = true;
+    _step('first-visit navigation done');
   } else {
-    // Fast refresh: prefer DataTables AJAX reload (1-2s) over full page reload (5-15s).
-    // Falls back to reload only if DataTables isn't present.
+    // Fast refresh: prefer DataTables AJAX reload (typically <1s) over full reload.
+    // Tighter race budget — if DT isn't ready in 1.2s we fall back to reload.
     let usedDt = false;
     try {
       usedDt = await Promise.race([
@@ -465,14 +466,15 @@ async function scrapeOtps() {
             return any;
           } catch (_) { return false; }
         }),
-        new Promise((resolve) => setTimeout(() => resolve(false), 2500)),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1200)),
       ]);
     } catch (_) { usedDt = false; }
+    _step(`refresh strategy=${usedDt ? 'datatables-ajax' : 'page-reload'}`);
 
     if (!usedDt) {
       // Fallback — full page reload, but with a tighter budget.
       try {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 8000 });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 6000 });
       } catch (e) {
         _cdrPageReady = false;
         throw new Error('CDR page reload failed: ' + e.message);
@@ -482,8 +484,9 @@ async function scrapeOtps() {
   }
 
   _step('navigation/reload done');
-  // Wait briefly for IMS DataTables AJAX to populate the table after page load.
-  await page.waitForFunction(
+  // Wait for IMS DataTables AJAX to populate. Reduced 6s→4s — if table still
+  // loading after 4s the next fast-poll tick will catch it.
+  const populated = await page.waitForFunction(
     () => {
       const rows = document.querySelectorAll('table tbody tr');
       if (!rows.length) return false;
@@ -491,9 +494,9 @@ async function scrapeOtps() {
       if (rows.length === 1 && /no data|empty|no record|loading/i.test(first)) return false;
       return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
     },
-    { timeout: 6000 }
+    { timeout: 4000 }
   ).catch(() => null);
-  _step('table populated');
+  _step(`table populated=${!!populated}`);
 
   const out = await page.evaluate(() => {
     const out = [];
