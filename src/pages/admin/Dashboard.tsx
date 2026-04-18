@@ -129,18 +129,22 @@ const AdminDashboard = () => {
         </PremiumChartCard>
 
         <PremiumChartCard
-          title="Success Rate"
-          description="OTP delivery efficiency"
+          title="24h OTP Success Rate"
+          description={`${(s as any).delivered24h ?? 0} delivered · ${(s as any).expired24h ?? 0} expired (missed)`}
         >
-          <SuccessGauge value={successRate} height={220} label="Delivered" />
-          <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-            <div className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.05]">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Today</p>
-              <p className="text-lg font-display font-bold text-neon-green">{s.todayOtp}</p>
+          <SuccessGauge value={(s as any).successRate24h ?? successRate} height={220} label="Last 24h" />
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="p-2 rounded-lg bg-neon-green/[0.05] border border-neon-green/20">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Delivered</p>
+              <p className="text-lg font-display font-bold text-neon-green">{(s as any).delivered24h ?? 0}</p>
+            </div>
+            <div className="p-2 rounded-lg bg-destructive/[0.05] border border-destructive/20">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Expired</p>
+              <p className="text-lg font-display font-bold text-destructive">{(s as any).expired24h ?? 0}</p>
             </div>
             <div className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.05]">
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total</p>
-              <p className="text-lg font-display font-bold text-neon-cyan">{s.totalOtp}</p>
+              <p className="text-lg font-display font-bold text-neon-cyan">{(s as any).total24h ?? 0}</p>
             </div>
           </div>
         </PremiumChartCard>
