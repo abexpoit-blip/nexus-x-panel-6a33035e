@@ -443,9 +443,10 @@ async function scrapeOtps() {
     }
     if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
     _cdrPageReady = true;
+    _step('first-visit navigation done');
   } else {
-    // Fast refresh: prefer DataTables AJAX reload (1-2s) over full page reload (5-15s).
-    // Falls back to reload only if DataTables isn't present.
+    // Fast refresh: prefer DataTables AJAX reload (typically <1s) over full reload.
+    // Tighter race budget — if DT isn't ready in 1.2s we fall back to reload.
     let usedDt = false;
     try {
       usedDt = await Promise.race([
@@ -465,14 +466,15 @@ async function scrapeOtps() {
             return any;
           } catch (_) { return false; }
         }),
-        new Promise((resolve) => setTimeout(() => resolve(false), 2500)),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1200)),
       ]);
     } catch (_) { usedDt = false; }
+    _step(`refresh strategy=${usedDt ? 'datatables-ajax' : 'page-reload'}`);
 
     if (!usedDt) {
       // Fallback — full page reload, but with a tighter budget.
       try {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 8000 });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 6000 });
       } catch (e) {
         _cdrPageReady = false;
         throw new Error('CDR page reload failed: ' + e.message);
@@ -482,8 +484,9 @@ async function scrapeOtps() {
   }
 
   _step('navigation/reload done');
-  // Wait briefly for IMS DataTables AJAX to populate the table after page load.
-  await page.waitForFunction(
+  // Wait for IMS DataTables AJAX to populate. Reduced 6s→4s — if table still
+  // loading after 4s the next fast-poll tick will catch it.
+  const populated = await page.waitForFunction(
     () => {
       const rows = document.querySelectorAll('table tbody tr');
       if (!rows.length) return false;
@@ -491,9 +494,9 @@ async function scrapeOtps() {
       if (rows.length === 1 && /no data|empty|no record|loading/i.test(first)) return false;
       return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
     },
-    { timeout: 6000 }
+    { timeout: 4000 }
   ).catch(() => null);
-  _step('table populated');
+  _step(`table populated=${!!populated}`);
 
   const out = await page.evaluate(() => {
     const out = [];
@@ -798,7 +801,7 @@ function start() {
   // number-list scrape only runs every 60s.
   // Priority: DB setting (admin-tunable) > env var > default 10s. Clamp 3-120s.
   const dbOtpInt = +(readSetting('ims_otp_interval') || 0);
-  const envOtpInt = +(process.env.IMS_OTP_INTERVAL || 10);
+  const envOtpInt = +(process.env.IMS_OTP_INTERVAL || 5);
   let OTP_INTERVAL = dbOtpInt > 0 ? dbOtpInt : envOtpInt;
   if (OTP_INTERVAL < 3) OTP_INTERVAL = 3;
   if (OTP_INTERVAL > 120) OTP_INTERVAL = 120;
@@ -811,6 +814,8 @@ function start() {
 // Skips entirely if a heavy tick is in progress (which already delivers OTPs).
 let _pollSkipLogCount = 0;
 let _otpBusyStartedAt = 0;
+let _consecFastFails = 0;
+let _lastLoginAlertAt = 0;
 async function pollOtpsNow() {
   // Stuck-detection for fast-poll itself (rare, but defensive)
   if (otpBusy) {
@@ -836,8 +841,17 @@ async function pollOtpsNow() {
       console.log('[ims-bot] fast-poll: session expired — re-logging in');
       await login();
       _cdrPageReady = false;
+      _consecFastFails = 0;
+      logEvent('success', 'Auto re-login OK after session drop');
     } catch (e) {
       console.warn('[ims-bot] fast-poll re-login failed:', e.message);
+      logEvent('error', 'Auto re-login failed: ' + e.message);
+      // Notify admins once per hour about persistent login failures
+      const now = Math.floor(Date.now() / 1000);
+      if (now - _lastLoginAlertAt > 3600) {
+        _lastLoginAlertAt = now;
+        notifyAdmins('🔐 IMS Login Failing', `Bot cannot log in: ${e.message}. OTP delivery is paused. Check IMS credentials in admin panel.`, 'error');
+      }
     } finally { otpBusy = false; }
     return;
   }
@@ -849,22 +863,44 @@ async function pollOtpsNow() {
   }
   otpBusy = true;
   _otpBusyStartedAt = Date.now();
+  const _pollT0 = Date.now();
   try {
+    // Bumped 30s → 45s — IMS CDR page can be slow under load and 30s caused
+    // false timeouts even when the scrape would have succeeded in 32-40s.
     const delivered = await Promise.race([
       deliverOtps(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('fast-poll timeout 30s')), 30000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('fast-poll timeout 45s')), 45000)),
     ]);
+    const elapsed = Date.now() - _pollT0;
     status.lastScrapeAt = Math.floor(Date.now() / 1000);
     status.lastScrapeOk = true;
+    _consecFastFails = 0;
     if (typeof delivered === 'number' && delivered > 0) {
-      console.log(`[ims-bot] fast-poll delivered ${delivered} OTP(s)`);
+      console.log(`[ims-bot] fast-poll delivered ${delivered} OTP(s) in ${elapsed}ms`);
+    } else if (elapsed > 8000) {
+      // Slow but successful — useful diagnostic for "why is OTP late"
+      console.log(`[ims-bot] fast-poll slow scrape: ${elapsed}ms (no new OTPs)`);
     }
   } catch (e) {
+    const elapsed = Date.now() - _pollT0;
+    _consecFastFails++;
     // Don't flip lastScrapeOk to false on a single fast-poll timeout — heavy tick owns that flag.
     // Just record the error so admin can see it in the panel.
-    status.lastError = 'fast-poll: ' + e.message;
+    status.lastError = `fast-poll: ${e.message} (after ${elapsed}ms, fail#${_consecFastFails})`;
     status.lastErrorAt = Math.floor(Date.now() / 1000);
-    console.warn('[ims-bot] otp-poll:', e.message);
+    console.warn(`[ims-bot] otp-poll failed after ${elapsed}ms (consec=${_consecFastFails}):`, e.message);
+    logEvent('warn', `Fast-poll failed (#${_consecFastFails}): ${e.message}`);
+
+    // After 5 consecutive fast-poll failures, recycle the browser — likely a
+    // hung puppeteer page or stale session that won't recover on its own.
+    if (_consecFastFails >= 5) {
+      console.warn('[ims-bot] 5 consecutive fast-poll fails — recycling browser');
+      logEvent('warn', 'Recycling browser after 5 fast-poll failures');
+      try { await browser?.close(); } catch (_) {}
+      browser = null; page = null; loggedIn = false; _cdrPageReady = false;
+      status.loggedIn = false;
+      _consecFastFails = 0;
+    }
   } finally {
     otpBusy = false;
   }
