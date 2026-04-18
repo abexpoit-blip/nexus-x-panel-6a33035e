@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { TableSkeleton } from "./TableSkeleton";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { usePageParam } from "@/hooks/usePageParam";
 
 interface Column<T> {
   key: string;
@@ -19,6 +20,8 @@ interface DataTableProps<T> {
   emptyText?: string;
   /** Items per page. Set to 0 / null to disable pagination. Defaults to 25. */
   pageSize?: number | null;
+  /** URL query-param key for the page number. Defaults to "page". */
+  pageParam?: string;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -29,13 +32,14 @@ export function DataTable<T extends Record<string, any>>({
   loading,
   emptyText = "No data available",
   pageSize = 25,
+  pageParam = "page",
 }: DataTableProps<T>) {
-  const [page, setPage] = useState(1);
-  const usePagination = !!pageSize && pageSize > 0;
+  const [page, setPage] = usePageParam(pageParam, 1);
+  const usePag = !!pageSize && pageSize > 0;
 
   const totalPages = useMemo(
-    () => (usePagination ? Math.max(1, Math.ceil(data.length / (pageSize as number))) : 1),
-    [data.length, pageSize, usePagination]
+    () => (usePag ? Math.max(1, Math.ceil(data.length / (pageSize as number))) : 1),
+    [data.length, pageSize, usePag]
   );
 
   // Clamp page when data shrinks (e.g. filter applied)
@@ -44,14 +48,14 @@ export function DataTable<T extends Record<string, any>>({
   }, [totalPages, page]);
 
   const visible = useMemo(() => {
-    if (!usePagination) return data;
+    if (!usePag) return data;
     const start = (page - 1) * (pageSize as number);
     return data.slice(start, start + (pageSize as number));
-  }, [data, page, pageSize, usePagination]);
+  }, [data, page, pageSize, usePag]);
 
   // Build a compact page-number list with ellipses (e.g. 1 … 4 5 [6] 7 8 … 20)
   const pageNumbers = useMemo<(number | "…")[]>(() => {
-    if (!usePagination || totalPages <= 1) return [];
+    if (!usePag || totalPages <= 1) return [];
     const out: (number | "…")[] = [];
     const window = 1;
     const add = (n: number | "…") => {
@@ -69,7 +73,7 @@ export function DataTable<T extends Record<string, any>>({
       }
     }
     return out;
-  }, [page, totalPages, usePagination]);
+  }, [page, totalPages, usePag]);
 
   if (loading && data.length === 0) {
     return <TableSkeleton rows={6} cols={columns.length} className={className} />;
@@ -124,7 +128,7 @@ export function DataTable<T extends Record<string, any>>({
         </div>
       </div>
 
-      {usePagination && data.length > (pageSize as number) && (
+      {usePag && data.length > (pageSize as number) && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
           <p className="text-xs text-muted-foreground">
             Showing{" "}
@@ -138,7 +142,7 @@ export function DataTable<T extends Record<string, any>>({
             <PageBtn onClick={() => setPage(1)} disabled={page === 1} title="First">
               <ChevronsLeft className="w-3.5 h-3.5" />
             </PageBtn>
-            <PageBtn onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} title="Previous">
+            <PageBtn onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} title="Previous">
               <ChevronLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline ml-1">Prev</span>
             </PageBtn>
@@ -162,7 +166,7 @@ export function DataTable<T extends Record<string, any>>({
                 )
               )}
             </div>
-            <PageBtn onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} title="Next">
+            <PageBtn onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} title="Next">
               <span className="hidden sm:inline mr-1">Next</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </PageBtn>
