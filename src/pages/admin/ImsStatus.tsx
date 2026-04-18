@@ -967,6 +967,8 @@ const CookiesEditor = ({ onSaved }: { onSaved: () => void }) => {
     </div>
   );
 };
+
+const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div className="space-y-1.5">
     <label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</label>
     {children}
