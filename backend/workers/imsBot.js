@@ -471,8 +471,21 @@ async function scrapeOtps() {
 // IMPORTANT ordering: scrape OTPs FIRST so already-assigned numbers get their codes
 // delivered ASAP (this is what agents care about most). New numbers come second.
 async function tick() {
-  if (busy) { console.log('[ims-bot] tick skipped — busy'); return; }
+  // Stuck-detection: if a previous tick has been "busy" for >5 minutes, force-reset.
+  // This used to deadlock the bot forever — heavy scrape would hang and every
+  // subsequent tick logged "skipped — busy" indefinitely.
+  if (busy) {
+    const stuckSec = (Date.now() - tickStartedAt) / 1000;
+    if (stuckSec > 300) {
+      console.warn(`[ims-bot] tick was busy for ${Math.floor(stuckSec)}s — force-reset`);
+      busy = false;
+    } else {
+      console.log(`[ims-bot] tick skipped — busy (${Math.floor(stuckSec)}s)`);
+      return;
+    }
+  }
   busy = true;
+  tickStartedAt = Date.now();
   console.log(`[ims-bot] tick start (loggedIn=${loggedIn})`);
   try {
     await ensureBrowser();
