@@ -914,5 +914,5 @@ async function syncLive() {
   }
 }
 
-module.exports = { start, stop, restart, tick, scrapeNow, syncLive, solveCaptchaText, getStatus, logEvent };
+module.exports = { start, stop, restart, tick, scrapeNow, syncLive, solveCaptchaText, getStatus, logEvent, getRecentOtpFor };
 
