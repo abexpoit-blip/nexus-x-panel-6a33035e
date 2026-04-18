@@ -485,12 +485,15 @@ async function deliverOtps() {
   }
   let delivered = 0;
   for (const o of otps) {
+    // Match the most recent active allocation for this phone.
+    // We DO NOT compare IMS date_ts vs allocated_at — server timezones / IMS clock
+    // skew were causing OTPs to be silently dropped when IMS reported a date
+    // earlier than allocated_at. The phone+active+otp-null match is enough.
     const a = db.prepare(`
       SELECT * FROM allocations
       WHERE provider='ims' AND phone_number=? AND status='active' AND otp IS NULL
-        AND (? = 0 OR allocated_at <= ?)
       ORDER BY allocated_at DESC LIMIT 1
-    `).get(o.phone_number, o.date_ts || 0, o.date_ts || 0);
+    `).get(o.phone_number);
     if (a) {
       await markOtpReceived(a, o.otp_code);
       status.otpsDeliveredTotal++;

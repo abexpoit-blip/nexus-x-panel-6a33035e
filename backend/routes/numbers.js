@@ -54,8 +54,10 @@ router.post('/get', authRequired, async (req, res) => {
       }
     }
 
-    // Per-request limit
-    const perReq = req.user.per_request_limit || 5;
+    // Per-request limit — re-read from DB so admin updates apply WITHOUT relogin.
+    // Falls back to 100 (was 5) so a missing/zero limit doesn't accidentally cap agents.
+    const fresh = db.prepare('SELECT per_request_limit, daily_limit FROM users WHERE id = ?').get(userId);
+    const perReq = fresh?.per_request_limit > 0 ? fresh.per_request_limit : 100;
     const requested = Math.min(+count || 1, perReq);
 
     // Daily limit
@@ -63,7 +65,7 @@ router.post('/get', authRequired, async (req, res) => {
     const usedToday = db.prepare(
       "SELECT COUNT(*) c FROM allocations WHERE user_id = ? AND allocated_at >= ?"
     ).get(userId, todayStart).c;
-    const dailyLimit = req.user.daily_limit || 100;
+    const dailyLimit = fresh?.daily_limit > 0 ? fresh.daily_limit : 1000;
     if (usedToday >= dailyLimit) {
       return res.status(429).json({ error: `Daily limit reached (${usedToday}/${dailyLimit})` });
     }
