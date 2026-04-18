@@ -44,7 +44,9 @@ function resolveCreds() {
 let { ENABLED, BASE_URL, USERNAME, PASSWORD } = resolveCreds();
 const HEADLESS = String(process.env.IMS_HEADLESS || 'true').toLowerCase() !== 'false';
 const CHROME_PATH = process.env.IMS_CHROME_PATH || undefined;
-const INTERVAL = +(process.env.IMS_SCRAPE_INTERVAL || 60);
+// Heavy scrape interval — minimum 60s. The full number-list pagination on imssms.org
+// can take 30-90s with 17k+ rows, so anything lower causes ticks to overlap and deadlock.
+const INTERVAL = Math.max(60, +(process.env.IMS_SCRAPE_INTERVAL || 60));
 
 let browser = null;
 let page = null;
