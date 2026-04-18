@@ -918,44 +918,91 @@ async function tick() {
 }
 
 // Cache of last scraped OTPs — used by getRecentOtpFor() so the IMS provider
-// can detect "this number was already used recently" before assigning to an agent.
-// Map: phone_number → { otp_code, date_ts, sms_text, cachedAt (unix sec) }
+// can detect "this number was already used recently" before assigning to an agent,
+// AND used by deliverOtps() to backfill OTPs that arrived before/just-after allocation.
+//
+// BURST-SAFE: stores up to 5 OTPs per phone (newest first). Critical for the
+// scenario where a single phone receives multiple OTPs in rapid succession
+// (e.g. resends, multiple service signups). Old single-entry cache would
+// overwrite earlier OTPs and lose them.
+//
+// Map: phone_number → Array<{ otp_code, date_ts, sms_text, cli, cachedAt }>
 const recentOtpCache = new Map();
 const RECENT_OTP_TTL = 30 * 60; // 30 minutes
+const MAX_OTPS_PER_PHONE = 5;
 
-function getRecentOtpFor(phone) {
-  const e = recentOtpCache.get(phone);
-  if (!e) return null;
+function _pruneOldEntries(arr) {
   const now = Math.floor(Date.now() / 1000);
-  if (now - e.cachedAt > RECENT_OTP_TTL) { recentOtpCache.delete(phone); return null; }
-  return e;
+  return arr.filter(e => now - e.cachedAt <= RECENT_OTP_TTL);
+}
+
+// Returns the LATEST cached OTP for this phone (used by IMS provider to
+// detect "already used" numbers before assigning).
+function getRecentOtpFor(phone) {
+  const arr = recentOtpCache.get(phone);
+  if (!arr || !arr.length) return null;
+  const fresh = _pruneOldEntries(arr);
+  if (!fresh.length) { recentOtpCache.delete(phone); return null; }
+  if (fresh.length !== arr.length) recentOtpCache.set(phone, fresh);
+  return fresh[0]; // newest first
+}
+
+// Add (or refresh) an OTP entry for a phone. Newest goes to front. Dedupe by
+// (otp_code, date_ts) so re-scrapes don't grow the array unnecessarily.
+function _addToCache(phone, entry) {
+  const existing = recentOtpCache.get(phone) || [];
+  // Dedupe: same OTP code with same/very-close timestamp = same SMS, skip.
+  const dup = existing.find(e =>
+    e.otp_code === entry.otp_code &&
+    Math.abs((e.date_ts || 0) - (entry.date_ts || 0)) < 5
+  );
+  if (dup) {
+    // Just refresh cachedAt so TTL eviction doesn't drop it
+    dup.cachedAt = entry.cachedAt;
+    return;
+  }
+  existing.unshift(entry);
+  // Keep only the newest MAX_OTPS_PER_PHONE entries
+  if (existing.length > MAX_OTPS_PER_PHONE) existing.length = MAX_OTPS_PER_PHONE;
+  recentOtpCache.set(phone, existing);
+}
+
+// Pick the best OTP to deliver for a given allocation. Strategy:
+//   1) Prefer OTPs that arrived AFTER allocated_at (these are definitely for this agent)
+//      — among those, pick the EARLIEST (first SMS post-allocation = the one they're waiting for).
+//   2) Otherwise fall back to the newest cached OTP (covers pre-existing OTP backfill case).
+function _pickBestOtpFor(allocation) {
+  const arr = recentOtpCache.get(allocation.phone_number);
+  if (!arr || !arr.length) return null;
+  const fresh = _pruneOldEntries(arr);
+  if (!fresh.length) return null;
+  const allocAt = +allocation.allocated_at || 0;
+  // Candidates that arrived after allocation (with 10s grace for clock skew)
+  const postAlloc = fresh
+    .filter(e => e.date_ts && e.date_ts >= (allocAt - 10))
+    .sort((a, b) => a.date_ts - b.date_ts); // earliest first
+  if (postAlloc.length) return postAlloc[0];
+  return fresh[0]; // newest pre-existing
 }
 
 // Helper: pull OTPs once and credit any matching active allocations.
 // Used by tick() AND by the lightweight `pollOtpsNow()` fast-poll loop.
-//
-// Backfill behaviour: on every scrape we (a) update the recentOtpCache with
-// the LATEST OTP per phone seen, then (b) for EVERY active+otp-pending
-// allocation we look up its phone in the cache and deliver if found.
-// This means historical OTPs already on the IMS panel are picked up the next
-// scrape after a number is assigned — no need to wait for a brand-new SMS.
 async function deliverOtps() {
   const otpsRaw = await scrapeOtps().catch((e) => { dwarn('[ims-bot] scrapeOtps:', e.message); return []; });
   const nowSec = Math.floor(Date.now() / 1000);
   // Debug: list scraped phones + how many active allocations are awaiting OTP
+  let pendingCount = 0;
   try {
     const phones = otpsRaw.slice(0, 5).map(o => `${o.phone_number}=${o.otp_code}`).join(',');
-    const pendingCount = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='active' AND otp IS NULL").get().c;
+    pendingCount = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='ims' AND status='active' AND otp IS NULL").get().c;
     console.log(`[ims-bot][deliver] scraped=${otpsRaw.length} top5=[${phones}] pendingAlloc=${pendingCount}`);
   } catch (_) {}
-  // (a) Refresh cache. otpsRaw is newest-first per scrapeOtps(); the FIRST
-  // entry per phone is the most recent SMS, so we always overwrite older
-  // cache entries with the freshest OTP.
-  const seenInThisScrape = new Set();
+  status.pendingAlloc = pendingCount;
+
+  // (a) Refresh cache. otpsRaw is newest-first per scrapeOtps(); add ALL entries
+  // (not just first per phone) so multi-OTP bursts on the same phone are preserved.
   for (const o of otpsRaw) {
-    if (seenInThisScrape.has(o.phone_number)) continue;
-    seenInThisScrape.add(o.phone_number);
-    recentOtpCache.set(o.phone_number, {
+    _addToCache(o.phone_number, {
       otp_code: o.otp_code,
       date_ts: o.date_ts || nowSec,
       sms_text: o.sms_text,
@@ -964,8 +1011,7 @@ async function deliverOtps() {
     });
   }
   // (b) Backfill: walk EVERY active IMS allocation that still has otp=NULL
-  // and try to match against the cache. Covers both fresh OTPs from this
-  // scrape AND historical OTPs scraped earlier.
+  // and try to match using best-fit selection (prefers post-allocation OTPs).
   let delivered = 0;
   let pending = [];
   try {
@@ -976,13 +1022,11 @@ async function deliverOtps() {
     `).all();
   } catch (_) { pending = []; }
   for (const a of pending) {
-    const cached = recentOtpCache.get(a.phone_number);
+    const cached = _pickBestOtpFor(a);
     if (!cached) continue;
     const allocAt = +a.allocated_at || 0;
-    // Stale-OTP guard: if the cached OTP arrived BEFORE allocation, it MIGHT
-    // be from a previous user — but only skip if this exact (number, otp)
-    // was already delivered to another allocation. Otherwise deliver it
-    // (covers numbers freshly added to pool that already have pending IMS history).
+    // Stale-OTP guard: if the picked OTP arrived BEFORE allocation, only deliver
+    // if this exact (number, otp) wasn't already delivered to someone else.
     if (cached.date_ts && allocAt && cached.date_ts < (allocAt - 60)) {
       const dup = db.prepare(`
         SELECT 1 FROM allocations
