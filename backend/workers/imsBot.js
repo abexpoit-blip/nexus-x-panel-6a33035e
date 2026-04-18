@@ -827,7 +827,9 @@ async function scrapeOtps() {
     });
     return out;
   });
-    _step(`done — extracted ${out.length} rows`);
+    if (out.length > _maxRowsSeen) _maxRowsSeen = out.length;
+    const uniquePhones = new Set(out.map(r => r.phone_number)).size;
+    _step(`done — extracted ${out.length} rows (${uniquePhones} unique phones, peak=${_maxRowsSeen})`);
     return out;
   })();
   try {
