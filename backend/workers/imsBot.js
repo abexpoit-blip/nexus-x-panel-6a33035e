@@ -386,20 +386,32 @@ async function scrapeNumbers() {
 //   DATE | RANGE | NUMBER | CLI | SMS | CURRENCY | MY PAYOUT
 // IMS shows newest entries first (sorted by DATE desc) — we preserve that order
 // so the latest OTP wins when the same number appears multiple times.
+// Track which page the persistent browser is currently sitting on.
+// We only navigate ONCE — afterwards we just click "Show Report" to refresh data.
+// This eliminates 90% of the timeout problems (no full page reloads).
+let _cdrPageReady = false;
+
 async function scrapeOtps() {
-  // Use 'domcontentloaded' — IMS pages do constant AJAX polling so networkidle never fires.
-  // If goto fails outright, throw so caller recycles the page (don't silently scrape stale DOM).
-  try {
-    await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 12000 });
-  } catch (e) {
-    throw new Error('CDR page navigation failed: ' + e.message);
+  const onCdrPage = /SMSCDRStats/i.test(page.url());
+
+  // Only navigate if we're not already on the CDR page (first scrape, or after re-login).
+  if (!onCdrPage || !_cdrPageReady) {
+    try {
+      await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 12000 });
+    } catch (e) {
+      _cdrPageReady = false;
+      throw new Error('CDR page navigation failed: ' + e.message);
+    }
+    if (/\/login/i.test(page.url())) {
+      // Session expired — flag for re-login but DON'T kill the browser.
+      loggedIn = false; _cdrPageReady = false;
+      return [];
+    }
+    try { await page.waitForSelector('button, input[type=submit], form', { timeout: 4000 }); } catch (_) {}
+    _cdrPageReady = true;
   }
-  if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
 
-  // CRITICAL: IMS SMSCDRStats renders an EMPTY table by default — must click "Show Report".
-  // Wait for any button/form to mount first.
-  try { await page.waitForSelector('button, input[type=submit], form', { timeout: 4000 }); } catch (_) {}
-
+  // Click "Show Report" to refresh data (much faster than full navigation).
   let clicked = null;
   try {
     clicked = await page.evaluate(() => {
@@ -410,12 +422,15 @@ async function scrapeOtps() {
       if (form) { form.submit(); return 'form-submit'; }
       return null;
     });
-  } catch (_) {}
+  } catch (_) { _cdrPageReady = false; throw new Error('CDR page lost — will re-navigate next tick'); }
 
-  // Short fixed wait for AJAX to fire (IMS DataTables ~600ms response).
-  await new Promise(r => setTimeout(r, 1000));
+  // Detect mid-scrape logout (page may have redirected after click)
+  if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
 
-  // Then poll briefly for actual data rows. Hard cap 5s (was 8s) to keep total under 20s.
+  // Short wait for AJAX (IMS DataTables ~600-1500ms).
+  await new Promise(r => setTimeout(r, 1200));
+
+  // Poll briefly for data rows.
   await page.waitForFunction(
     () => {
       const rows = document.querySelectorAll('table tbody tr');
