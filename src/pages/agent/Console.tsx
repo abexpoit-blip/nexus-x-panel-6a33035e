@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Search, RefreshCw, Inbox, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { cliBadgeClass } from "@/lib/cliBadge";
 import { usePagination } from "@/components/Pagination";
 
 // Shorten IMS range names like "Peru Bitel TF04" → "TF04"
