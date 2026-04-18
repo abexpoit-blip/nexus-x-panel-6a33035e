@@ -622,18 +622,17 @@ async function scrapeOtps() {
         const opts = Array.from(sel.options || []).map(o => ({ text: o.text, value: o.value }));
         // Preference order: "All" → 1000 → 500 → 250 → 100 → highest numeric
         const findOpt = (pred) => Array.from(sel.options || []).find(pred);
-        // Cap at 500 — "All"/1000 makes DataTables render 12k+ rows which
-        // hangs page.evaluate() (Runtime.callFunctionOn timeout). 500 is a
-        // safe sweet spot: handles 100+ agent burst, finishes in <2s.
-        let pick = findOpt(o => +o.value === 500)
-                || findOpt(o => +o.value === 250)
-                || findOpt(o => +o.value === 100)
-                || findOpt(o => +o.value === 50);
+        // Cap at 100 — anything higher (250/500) makes DataTables render
+        // freeze the JS thread (callFunctionOn timeout). 100 rows = ~3-5s of
+        // recent OTPs which is plenty between 18s polls.
+        let pick = findOpt(o => +o.value === 100)
+                || findOpt(o => +o.value === 50)
+                || findOpt(o => +o.value === 25);
         if (!pick) {
-          // No preferred option — pick highest numeric value but cap at 500
+          // No preferred option — pick highest numeric value but cap at 100
           const nums = Array.from(sel.options || [])
             .map(o => ({ opt: o, n: +o.value }))
-            .filter(x => Number.isFinite(x.n) && x.n > 0 && x.n <= 500)
+            .filter(x => Number.isFinite(x.n) && x.n > 0 && x.n <= 100)
             .sort((a, b) => b.n - a.n);
           if (nums.length) pick = nums[0].opt;
         }
@@ -677,11 +676,10 @@ async function scrapeOtps() {
             if (!sel) return { ok: false };
             const cur = +sel.value;
             // If currently small, bump back up
-            if (cur > 0 && cur < 100) {
+            if (cur > 0 && cur < 50) {
               const opts = Array.from(sel.options || []);
-              const pick = opts.find(o => +o.value === 500)
-                        || opts.find(o => +o.value === 250)
-                        || opts.find(o => +o.value === 100);
+              const pick = opts.find(o => +o.value === 100)
+                        || opts.find(o => +o.value === 50);
               if (pick) {
                 sel.value = pick.value;
                 sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -717,24 +715,35 @@ async function scrapeOtps() {
   }
 
   _step('navigation/refresh done');
-  // Wait for IMS DataTables AJAX to populate after Show Report click.
-  // Heavy CDR responses can take 8-12s, so give 15s.
-  const populated = await page.waitForFunction(
-    () => {
-      const rows = document.querySelectorAll('table tbody tr');
-      if (!rows.length) return false;
-      // Count how many rows look like real CDR data (have an 8-15 digit number)
-      const dataRows = Array.from(rows).filter(r => {
-        const t = (r.innerText || '').toLowerCase();
-        if (/refresh must be done|attempt is logged/i.test(t)) return false;
-        if (/^no data|^no record|^loading|^processing/i.test(t.trim())) return false;
-        return /\d{8,15}/.test(t);
-      });
-      return dataRows.length > 0;
-    },
-    { timeout: 8000 }
-  ).catch(() => null);
-  _step(`table populated=${!!populated}`);
+  // Poll for table population via short evaluate() calls instead of
+  // waitForFunction (which runs INSIDE the page — useless if JS thread frozen).
+  // Each evaluate is raced against 1.5s; if 5 attempts all timeout → page frozen.
+  let populated = false;
+  for (let i = 0; i < 8; i++) {
+    try {
+      const ok = await Promise.race([
+        page.evaluate(() => {
+          const rows = document.querySelectorAll('table tbody tr');
+          if (!rows.length) return false;
+          for (const r of rows) {
+            const t = (r.innerText || '');
+            if (/refresh must be done|attempt is logged/i.test(t)) continue;
+            if (/^(no data|no record|loading|processing)/i.test(t.trim())) continue;
+            if (/\d{8,15}/.test(t)) return true;
+          }
+          return false;
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('eval timeout 1.5s')), 1500)),
+      ]);
+      if (ok) { populated = true; break; }
+    } catch (e) {
+      // page frozen — break early, don't waste more attempts
+      _step(`poll attempt ${i + 1} timed out (${e.message}) — page may be frozen`);
+      break;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  _step(`table populated=${populated}`);
 
   // Debug snapshot — when populated check fails, dump page diagnostics so we
   // can see WHY (wrong selector? page in different state? login redirect?).
