@@ -558,9 +558,9 @@ async function tick() {
     status.lastScrapeOk = false;
     console.error('[ims-bot] tick failed:', e.message);
     logEvent('error', 'Scrape failed: ' + e.message);
-    if (consecFail >= 3) {
+    if (consecFail >= 2) {
       console.warn('[ims-bot] recycling browser after repeated failures');
-      logEvent('warn', 'Recycling browser after 3 consecutive failures');
+      logEvent('warn', 'Recycling browser after 2 consecutive failures');
       try { await browser?.close(); } catch (_) {}
       browser = null; page = null; loggedIn = false;
       status.loggedIn = false;
