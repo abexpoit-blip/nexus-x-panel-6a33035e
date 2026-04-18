@@ -130,6 +130,10 @@ async function ensureBrowser() {
   browser = await puppeteer.launch({
     headless: HEADLESS ? 'new' : false,
     executablePath: CHROME_PATH,
+    // Bumped from default 30s → 90s. Heavy CDR responses + occasional IMS
+    // server lag can exceed 30s during page.evaluate() calls, causing
+    // "Runtime.callFunctionOn timed out" + Target closed crashes.
+    protocolTimeout: 90000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
