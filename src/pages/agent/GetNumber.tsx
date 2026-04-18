@@ -540,19 +540,25 @@ const AgentGetNumber = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-[auto_1fr_120px_100px_80px] gap-3 px-4 py-2 text-xs font-semibold text-muted-foreground border-b border-white/[0.06] mb-1">
+          <div className="grid grid-cols-[auto_1fr_120px_100px_90px_80px] gap-3 px-4 py-2 text-xs font-semibold text-muted-foreground border-b border-white/[0.06] mb-1">
             <span className="w-2" />
             <span>Number</span>
             <span>Operator</span>
             <span>OTP</span>
+            <span>Time</span>
             <span className="text-right">Actions</span>
           </div>
 
           <div className="space-y-1">
-            {pageItems.map((n) => (
+            {pageItems.map((n) => {
+              const allocAt = n.allocated_at || nowTick;
+              const elapsed = n.otp && n.otp_received_at
+                ? n.otp_received_at - allocAt
+                : nowTick - allocAt;
+              return (
               <div
                 key={n.id}
-                className="grid grid-cols-[auto_1fr_120px_100px_80px] gap-3 items-center px-4 py-3 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition-colors"
+                className="grid grid-cols-[auto_1fr_120px_100px_90px_80px] gap-3 items-center px-4 py-3 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition-colors"
               >
                 <div className={cn(
                   "w-2 h-2 rounded-full",
@@ -585,6 +591,21 @@ const AgentGetNumber = () => {
                     <span className="text-xs text-muted-foreground italic">Waiting...</span>
                   )}
                 </div>
+                <span
+                  className={cn(
+                    "text-xs font-mono tabular-nums",
+                    n.otp
+                      ? "text-neon-green/80"
+                      : elapsed > 180
+                        ? "text-neon-red"
+                        : elapsed > 60
+                          ? "text-neon-amber"
+                          : "text-muted-foreground"
+                  )}
+                  title={n.otp ? "Time taken to receive OTP" : "Elapsed since allocation"}
+                >
+                  {fmtDuration(elapsed)}
+                </span>
                 <div className="flex justify-end">
                   <span className={cn(
                     "px-2 py-0.5 rounded-full text-[10px] font-semibold",
@@ -594,7 +615,8 @@ const AgentGetNumber = () => {
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {totalPages > 1 && (
