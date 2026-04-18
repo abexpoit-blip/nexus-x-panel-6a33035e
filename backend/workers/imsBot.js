@@ -338,9 +338,12 @@ async function scrapeOtps() {
       const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
       if (cells.length < 5) return;
 
-      // DATE: first cell matching YYYY-MM-DD HH:MM:SS pattern
+      // DATE: first cell matching YYYY-MM-DD HH:MM:SS pattern.
+      // IMS displays times in the server's local timezone (BDT). Parse WITHOUT
+      // appending 'Z' so JS uses local time — appending Z previously caused a
+      // 6-hour shift that made the staleness guard reject every fresh OTP.
       const dateCell = cells.find(t => /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(t));
-      const dateTs = dateCell ? Math.floor(new Date(dateCell.replace(' ', 'T') + 'Z').getTime() / 1000) : 0;
+      const dateTs = dateCell ? Math.floor(new Date(dateCell.replace(' ', 'T')).getTime() / 1000) : 0;
 
       // NUMBER: pure-digit cell of length 8-15 (after stripping spaces/dashes)
       const phone = cells.find(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
