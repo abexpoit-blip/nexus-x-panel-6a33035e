@@ -423,12 +423,13 @@ async function scrapeNumbers() {
 let _cdrPageReady = false;
 
 async function scrapeOtps() {
+  if (!page) throw new Error('page not ready');
   const onCdrPage = /SMSCDRStats/i.test(page.url());
 
   if (!onCdrPage || !_cdrPageReady) {
-    // First visit (or after logout) — full navigation
+    // First visit (or after logout) — full navigation.
     try {
-      await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 12000 });
+      await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 10000 });
     } catch (e) {
       _cdrPageReady = false;
       throw new Error('CDR page navigation failed: ' + e.message);
@@ -436,15 +437,41 @@ async function scrapeOtps() {
     if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
     _cdrPageReady = true;
   } else {
-    // Already on CDR page — just reload to fetch fresh data (no button click needed).
-    // This is much faster + safer than clicking "Show Report".
+    // Fast refresh: prefer DataTables AJAX reload (1-2s) over full page reload (5-15s).
+    // Falls back to reload only if DataTables isn't present.
+    let usedDt = false;
     try {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
-    } catch (e) {
-      _cdrPageReady = false;
-      throw new Error('CDR page reload failed: ' + e.message);
+      usedDt = await Promise.race([
+        page.evaluate(() => {
+          try {
+            // eslint-disable-next-line no-undef
+            const $ = window.jQuery || window.$;
+            if (!$ || !$.fn || !$.fn.dataTable) return false;
+            const tables = $('table.dataTable, table');
+            let any = false;
+            tables.each(function () {
+              if ($.fn.dataTable.isDataTable(this)) {
+                $(this).DataTable().ajax.reload(null, false);
+                any = true;
+              }
+            });
+            return any;
+          } catch (_) { return false; }
+        }),
+        new Promise((resolve) => setTimeout(() => resolve(false), 2500)),
+      ]);
+    } catch (_) { usedDt = false; }
+
+    if (!usedDt) {
+      // Fallback — full page reload, but with a tighter budget.
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 8000 });
+      } catch (e) {
+        _cdrPageReady = false;
+        throw new Error('CDR page reload failed: ' + e.message);
+      }
+      if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
     }
-    if (/\/login/i.test(page.url())) { loggedIn = false; _cdrPageReady = false; return []; }
   }
 
   // Wait briefly for IMS DataTables AJAX to populate the table after page load.
