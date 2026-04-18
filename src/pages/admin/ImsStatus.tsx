@@ -220,6 +220,11 @@ const AdminImsStatus = () => {
           {/* OTP expiry window (5-30 min) — applies to ALL providers */}
           <OtpExpirySetting onSaved={() => refetch()} />
 
+          {/* Recent OTP visibility window — controls how long received OTPs
+              stay on the agent's "live" Get Number / My Numbers list before
+              moving into their permanent OTP History page. */}
+          <RecentOtpWindowSetting onSaved={() => refetch()} />
+
           {/* Manual paste-numbers */}
           <ManualPastePool
             existingRanges={poolData?.ranges?.map(r => r.name) ?? []}
