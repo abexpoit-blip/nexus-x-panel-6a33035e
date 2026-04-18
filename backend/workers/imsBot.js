@@ -740,20 +740,26 @@ async function scrapeOtps() {
   // can see WHY (wrong selector? page in different state? login redirect?).
   if (!populated) {
     try {
-      const diag = await page.evaluate(() => ({
-        url: location.href,
-        title: document.title,
-        tables: document.querySelectorAll('table').length,
-        rowsAnyTable: document.querySelectorAll('tr').length,
-        rowsTbody: document.querySelectorAll('table tbody tr').length,
-        firstRowText: (document.querySelector('table tbody tr')?.innerText || '').slice(0, 200),
-        bodyTextSample: (document.body.innerText || '').slice(0, 300),
-        hasLoadingClass: !!document.querySelector('.dataTables_processing[style*="block"], .loading'),
-      }));
+      // Race diag against 5s — if page is frozen, don't burn protocolTimeout
+      const diag = await Promise.race([
+        page.evaluate(() => ({
+          url: location.href,
+          title: document.title,
+          tables: document.querySelectorAll('table').length,
+          rowsAnyTable: document.querySelectorAll('tr').length,
+          rowsTbody: document.querySelectorAll('table tbody tr').length,
+          firstRowText: (document.querySelector('table tbody tr')?.innerText || '').slice(0, 200),
+          bodyTextSample: (document.body.innerText || '').slice(0, 300),
+          hasLoadingClass: !!document.querySelector('.dataTables_processing[style*="block"], .loading'),
+        })),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('diag timeout 5s — page frozen')), 5000)),
+      ]);
       console.log('[ims-bot][scrape][diag] not populated →', JSON.stringify(diag));
       logEvent('warn', `Scrape diag: tables=${diag.tables} tbody-rows=${diag.rowsTbody} url=${diag.url.slice(-40)}`);
     } catch (e) {
       console.warn('[ims-bot][scrape][diag] failed:', e.message);
+      // Page is frozen — recycle on next tick
+      _cdrPageReady = false;
     }
   }
 
