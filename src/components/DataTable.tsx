@@ -38,8 +38,8 @@ export function DataTable<T extends Record<string, any>>({
   const usePag = !!pageSize && pageSize > 0;
 
   const totalPages = useMemo(
-    () => (usePagination ? Math.max(1, Math.ceil(data.length / (pageSize as number))) : 1),
-    [data.length, pageSize, usePagination]
+    () => (usePag ? Math.max(1, Math.ceil(data.length / (pageSize as number))) : 1),
+    [data.length, pageSize, usePag]
   );
 
   // Clamp page when data shrinks (e.g. filter applied)
@@ -48,14 +48,14 @@ export function DataTable<T extends Record<string, any>>({
   }, [totalPages, page]);
 
   const visible = useMemo(() => {
-    if (!usePagination) return data;
+    if (!usePag) return data;
     const start = (page - 1) * (pageSize as number);
     return data.slice(start, start + (pageSize as number));
-  }, [data, page, pageSize, usePagination]);
+  }, [data, page, pageSize, usePag]);
 
   // Build a compact page-number list with ellipses (e.g. 1 … 4 5 [6] 7 8 … 20)
   const pageNumbers = useMemo<(number | "…")[]>(() => {
-    if (!usePagination || totalPages <= 1) return [];
+    if (!usePag || totalPages <= 1) return [];
     const out: (number | "…")[] = [];
     const window = 1;
     const add = (n: number | "…") => {
@@ -73,7 +73,7 @@ export function DataTable<T extends Record<string, any>>({
       }
     }
     return out;
-  }, [page, totalPages, usePagination]);
+  }, [page, totalPages, usePag]);
 
   if (loading && data.length === 0) {
     return <TableSkeleton rows={6} cols={columns.length} className={className} />;
@@ -128,7 +128,7 @@ export function DataTable<T extends Record<string, any>>({
         </div>
       </div>
 
-      {usePagination && data.length > (pageSize as number) && (
+      {usePag && data.length > (pageSize as number) && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
           <p className="text-xs text-muted-foreground">
             Showing{" "}
