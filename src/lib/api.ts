@@ -208,7 +208,7 @@ function demoRoute(path: string, opts: RequestInit): any {
   }
   if (path === "/numbers/my") return demoData.myNumbers();
   if (path === "/numbers/summary") return demoData.numberSummary();
-  if (path === "/otp/sync" && method === "POST") return demoData.syncOtp();
+  if (path === "/numbers/sync" && method === "POST") return demoData.syncOtp();
 
   if (path === "/notifications") return demoData.notifications();
   if (path.startsWith("/audit")) return demoData.audit();
@@ -352,7 +352,7 @@ export const api = {
       today: WaitStat; week: WaitStat; month: WaitStat; all_time: WaitStat;
     };
   }>("/numbers/summary"),
-  syncOtp: () => request<{ updated: number }>("/otp/sync", { method: "POST" }),
+  syncOtp: () => request<{ updated: number }>("/numbers/sync", { method: "POST" }),
   pricing: () => request<{ pricing: { id: number; name: string; code: string; flag: string; price_bdt: number; operator_count: number }[] }>("/numbers/pricing"),
 
   // Rates
