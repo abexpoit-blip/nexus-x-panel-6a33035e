@@ -500,7 +500,13 @@ async function tick() {
     //   • IMS My-SMS-Numbers page has 17k+ rows → pagination takes 90-180s
     //   • That hangs the tick longer than INTERVAL → "skipped — busy" deadlock
     //   • Pool is refilled via admin "Manual Paste" or the explicit "Sync Live" button
-    await deliverOtps();
+    // Hard 30s cap on the OTP scrape — if puppeteer hangs (CDR page stalls, AJAX
+    // never settles, etc.) we abort and let the next tick try fresh. Without this
+    // a single hung evaluate() blocks every subsequent tick forever.
+    await Promise.race([
+      deliverOtps(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('deliverOtps timeout 30s')), 30000)),
+    ]);
     const nums = []; // numbers scrape disabled — see above. Set empty so auto-pause logic works.
     // Auto-pause disabled — numbers scrape removed, so empty-streak no longer applies.
     emptyStreak = 0;
