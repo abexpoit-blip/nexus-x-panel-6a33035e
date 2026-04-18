@@ -848,7 +848,7 @@ async function stop() {
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
   if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
   try { await browser?.close(); } catch (_) {}
-  browser = null; page = null; loggedIn = false;
+  browser = null; page = null; loggedIn = false; _cdrPageReady = false;
   status.running = false;
   status.loggedIn = false;
 }
