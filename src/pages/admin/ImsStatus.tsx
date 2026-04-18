@@ -63,6 +63,7 @@ const AdminImsStatus = () => {
   const [restarting, setRestarting] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [bgStarting, setBgStarting] = useState(false);
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["ims-status"],
     queryFn: () => api.admin.imsStatus(),
@@ -73,7 +74,14 @@ const AdminImsStatus = () => {
     queryFn: () => api.admin.imsPoolBreakdown(),
     refetchInterval: 10000,
   });
+  // Poll background numbers job — fast (2s) when running, slow (15s) when idle
+  const { data: numbersJob } = useQuery({
+    queryKey: ["ims-numbers-job"],
+    queryFn: () => api.admin.imsNumbersJob(),
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : 15000),
+  });
   const s = data?.status as ImsStatus | undefined;
+  const jobRunning = numbersJob?.status === "running";
 
   const handleAction = async (action: "restart" | "start" | "stop") => {
     const labels = { restart: "Restart", start: "Start", stop: "Stop" };
@@ -137,6 +145,22 @@ const AdminImsStatus = () => {
     }
   };
 
+  const handleScrapeNumbersBg = async () => {
+    setBgStarting(true);
+    try {
+      const r = await api.admin.imsScrapeNumbersStart();
+      if (r.ok) {
+        toast.success("Background numbers scrape started — progress shown below", { duration: 4000 });
+      } else {
+        toast.error(r.error || "Failed to start background scrape");
+      }
+    } catch (e) {
+      toast.error("Failed: " + (e as Error).message);
+    } finally {
+      setBgStarting(false);
+    }
+  };
+
   return (
     <div className="relative space-y-6">
       <GradientMesh variant="default" />
@@ -183,6 +207,15 @@ const AdminImsStatus = () => {
               {syncing ? "Syncing…" : "Sync Live"}
             </button>
             <button
+              onClick={handleScrapeNumbersBg}
+              disabled={bgStarting || jobRunning || !s?.running}
+              title={!s?.running ? "Start the bot first" : "Scrape numbers + ranges in background (non-blocking)"}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-purple/10 border border-neon-purple/30 text-neon-purple hover:bg-neon-purple/20 transition disabled:opacity-50"
+            >
+              <Database className={cn("w-3.5 h-3.5", (bgStarting || jobRunning) && "animate-pulse")} />
+              {jobRunning ? "Scraping in BG…" : bgStarting ? "Starting…" : "Scrape Numbers (BG)"}
+            </button>
+            <button
               onClick={() => handleAction("restart")}
               disabled={restarting}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-magenta/10 border border-neon-magenta/30 text-neon-magenta hover:bg-neon-magenta/20 transition disabled:opacity-50"
@@ -200,6 +233,55 @@ const AdminImsStatus = () => {
       />
 
       {isLoading && <p className="text-center text-muted-foreground text-sm">Loading…</p>}
+
+      {/* Background numbers-scrape job — shows live status when running or last result */}
+      {numbersJob && numbersJob.status !== "idle" && (
+        <div className={cn(
+          "glass-card rounded-xl p-4 border",
+          numbersJob.status === "running" && "border-neon-purple/40 bg-neon-purple/5",
+          numbersJob.status === "done" && "border-neon-green/40 bg-neon-green/5",
+          numbersJob.status === "failed" && "border-destructive/40 bg-destructive/5",
+        )}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <Database className={cn(
+                "w-5 h-5",
+                numbersJob.status === "running" && "text-neon-purple animate-pulse",
+                numbersJob.status === "done" && "text-neon-green",
+                numbersJob.status === "failed" && "text-destructive",
+              )} />
+              <div>
+                <div className="text-sm font-semibold">
+                  Background Numbers Scrape — {numbersJob.status.toUpperCase()}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{numbersJob.progress}</div>
+              </div>
+            </div>
+            {numbersJob.result && (
+              <div className="flex gap-4 text-xs">
+                <div><span className="text-muted-foreground">Added:</span> <span className="font-mono text-neon-green font-bold">+{numbersJob.result.added}</span></div>
+                <div><span className="text-muted-foreground">Removed:</span> <span className="font-mono text-destructive font-bold">-{numbersJob.result.removed}</span></div>
+                <div><span className="text-muted-foreground">Kept:</span> <span className="font-mono">{numbersJob.result.kept}</span></div>
+                <div><span className="text-muted-foreground">Live in IMS:</span> <span className="font-mono text-neon-cyan font-bold">{numbersJob.result.scraped}</span></div>
+                {numbersJob.result.ranges?.length > 0 && (
+                  <div><span className="text-muted-foreground">Ranges:</span> <span className="font-mono">{numbersJob.result.ranges.length}</span></div>
+                )}
+              </div>
+            )}
+            {numbersJob.error && (
+              <div className="text-xs text-destructive font-mono max-w-md truncate" title={numbersJob.error}>
+                {numbersJob.error}
+              </div>
+            )}
+            {numbersJob.startedAt && (
+              <div className="text-xs text-muted-foreground">
+                Started {fmtAgo(numbersJob.startedAt)}
+                {numbersJob.finishedAt && ` · Finished ${fmtAgo(numbersJob.finishedAt)}`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {s && (
         <>

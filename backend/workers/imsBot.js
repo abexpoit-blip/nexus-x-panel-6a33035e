@@ -946,5 +946,76 @@ async function syncLive() {
   }
 }
 
-module.exports = { start, stop, restart, tick, scrapeNow, syncLive, solveCaptchaText, getStatus, logEvent, getRecentOtpFor };
+// =============================================================
+// BACKGROUND Numbers Scrape — fire-and-forget version of syncLive.
+// Returns immediately with { jobId, status: 'running' }, runs scrape in background.
+// Frontend polls getNumbersJobStatus() every 2-3s to track progress.
+// =============================================================
+let _numbersJob = {
+  id: 0,
+  status: 'idle',     // 'idle' | 'running' | 'done' | 'failed'
+  startedAt: null,    // unix sec
+  finishedAt: null,
+  result: null,       // { added, removed, kept, scraped, ranges }
+  error: null,
+  progress: '',       // human-readable: "scraping page 5/12..."
+};
+
+function getNumbersJobStatus() {
+  return { ..._numbersJob };
+}
+
+function startNumbersScrapeBackground() {
+  if (_numbersJob.status === 'running') {
+    return { ok: false, error: 'A numbers scrape is already running', jobId: _numbersJob.id };
+  }
+  if (busy) {
+    return { ok: false, error: 'Bot is busy with another task — wait a moment' };
+  }
+  if (!status.running) {
+    return { ok: false, error: 'Bot is not running — start it first' };
+  }
+  _numbersJob = {
+    id: Date.now(),
+    status: 'running',
+    startedAt: Math.floor(Date.now() / 1000),
+    finishedAt: null,
+    result: null,
+    error: null,
+    progress: 'Starting…',
+  };
+  logEvent('info', 'Background numbers scrape triggered by admin');
+
+  // Run in background — don't await
+  (async () => {
+    try {
+      _numbersJob.progress = 'Calling syncLive (browser scrape + reconcile)…';
+      const result = await syncLive();
+      _numbersJob.status = result.ok ? 'done' : 'failed';
+      _numbersJob.result = result.ok ? {
+        added: result.added, removed: result.removed,
+        kept: result.kept, scraped: result.scraped, ranges: result.ranges,
+      } : null;
+      _numbersJob.error = result.ok ? null : (result.error || 'Unknown error');
+      _numbersJob.finishedAt = Math.floor(Date.now() / 1000);
+      _numbersJob.progress = result.ok
+        ? `Done: +${result.added} added, -${result.removed} removed, ${result.kept} kept`
+        : `Failed: ${result.error}`;
+    } catch (e) {
+      _numbersJob.status = 'failed';
+      _numbersJob.error = e.message;
+      _numbersJob.finishedAt = Math.floor(Date.now() / 1000);
+      _numbersJob.progress = `Crashed: ${e.message}`;
+      logEvent('error', 'Background numbers scrape crashed: ' + e.message);
+    }
+  })();
+
+  return { ok: true, jobId: _numbersJob.id, status: 'running' };
+}
+
+module.exports = {
+  start, stop, restart, tick, scrapeNow, syncLive, solveCaptchaText,
+  getStatus, logEvent, getRecentOtpFor,
+  startNumbersScrapeBackground, getNumbersJobStatus,
+};
 

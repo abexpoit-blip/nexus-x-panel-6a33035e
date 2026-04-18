@@ -138,6 +138,8 @@ function demoRoute(path: string, opts: RequestInit): any {
   if (path === "/admin/ims-restart" && method === "POST") { demoImsState.restart(); return { ok: true }; }
   if (path === "/admin/ims-start" && method === "POST") { demoImsState.start(); return { ok: true }; }
   if (path === "/admin/ims-stop" && method === "POST") { demoImsState.stop(); return { ok: true }; }
+  if (path === "/admin/ims-scrape-numbers" && method === "POST") return { ok: true, jobId: Date.now(), status: "running" };
+  if (path === "/admin/ims-numbers-job") return { id: 0, status: "idle", startedAt: null, finishedAt: null, result: null, error: null, progress: "" };
   if (path === "/admin/ims-credentials" && method === "GET") return {
     enabled: true, base_url: "https://www.imssms.org", username: "Shovonkhan7",
     password_masked: "Sh****34", has_password: true,
@@ -453,6 +455,8 @@ export const api = {
     imsStop: () => request<{ ok: boolean }>("/admin/ims-stop", { method: "POST" }),
     imsScrapeNow: () => request<{ ok: boolean; added?: number; otps?: number; error?: string }>("/admin/ims-scrape-now", { method: "POST" }),
     imsSyncLive: () => request<{ ok: boolean; added?: number; removed?: number; kept?: number; scraped?: number; ranges?: string[]; error?: string }>("/admin/ims-sync-live", { method: "POST" }),
+    imsScrapeNumbersStart: () => request<{ ok: boolean; jobId?: number; status?: string; error?: string }>("/admin/ims-scrape-numbers", { method: "POST" }),
+    imsNumbersJob: () => request<{ id: number; status: 'idle'|'running'|'done'|'failed'; startedAt: number|null; finishedAt: number|null; result: { added: number; removed: number; kept: number; scraped: number; ranges: string[] } | null; error: string|null; progress: string }>("/admin/ims-numbers-job"),
     imsPoolBreakdown: () => request<{ ranges: { name: string; count: number; last_added: number }[]; totalActive: number }>("/admin/ims-pool-breakdown"),
     imsPoolCleanup: (body: { mode: "expired" | "older_than" | "range" | "all_pool"; hours?: number; range?: string }) =>
       request<{ ok: boolean; removed: number; description: string }>("/admin/ims-pool-cleanup", {
