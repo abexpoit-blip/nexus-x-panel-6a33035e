@@ -27,6 +27,8 @@ type ImsStatus = {
   otpReceived: number;
   emptyStreak?: number;
   emptyLimit?: number;
+  cookieFailStreak?: number;
+  hasCookies?: boolean;
   events?: { ts: number; level: string; message: string; meta: unknown }[];
 };
 
