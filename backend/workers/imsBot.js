@@ -1090,6 +1090,13 @@ function start() {
   }
   if (scrapeTimer) { clearInterval(scrapeTimer); scrapeTimer = null; }
   if (otpTimer) { clearInterval(otpTimer); otpTimer = null; }
+  // Recovery: any 'claiming' rows from a crashed/restarted bulk allocation
+  // should be returned to 'pool' so they can be assigned again. Safe because
+  // legitimate claims flip to 'active' inside the same transaction in routes/numbers.js.
+  try {
+    const r = db.prepare("UPDATE allocations SET status='pool' WHERE provider='ims' AND status='claiming'").run();
+    if (r.changes) console.log(`[ims-bot] recovered ${r.changes} 'claiming' allocations → 'pool'`);
+  } catch (_) {}
   status.running = true;
   emptyStreak = 0;
   console.log(`✓ IMS bot starting (heavy tick every ${INTERVAL}s for keepalive, headless=${HEADLESS}, base=${BASE_URL})`);
