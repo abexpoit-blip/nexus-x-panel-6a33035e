@@ -635,11 +635,14 @@ async function scrapeOtps() {
     () => {
       const rows = document.querySelectorAll('table tbody tr');
       if (!rows.length) return false;
-      const first = (rows[0].innerText || '').toLowerCase();
-      // Skip the IMS rate-limit warning row
-      if (/refresh must be done|attempt is logged/i.test(first)) return false;
-      if (rows.length === 1 && /no data|empty|no record|loading/i.test(first)) return false;
-      return Array.from(rows).some(r => /\d{8,15}/.test(r.innerText || ''));
+      // Count how many rows look like real CDR data (have an 8-15 digit number)
+      const dataRows = Array.from(rows).filter(r => {
+        const t = (r.innerText || '').toLowerCase();
+        if (/refresh must be done|attempt is logged/i.test(t)) return false;
+        if (/^no data|^no record|^loading|^processing/i.test(t.trim())) return false;
+        return /\d{8,15}/.test(t);
+      });
+      return dataRows.length > 0;
     },
     { timeout: 15000 }
   ).catch(() => null);
