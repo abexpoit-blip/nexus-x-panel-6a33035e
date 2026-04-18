@@ -493,50 +493,15 @@ async function tick() {
     await ensureBrowser();
     if (!loggedIn) { console.log('[ims-bot] logging in…'); await login(); console.log('[ims-bot] login OK'); }
 
-    // 1) OTPs FIRST → match active allocations & credit (priority — agents waiting)
+    // 1) OTPs only — agents care about OTP delivery, not refilling pool every cycle.
+    // Number-list scraping is DISABLED in the heavy tick because:
+    //   • IMS My-SMS-Numbers page has 17k+ rows → pagination takes 90-180s
+    //   • That hangs the tick longer than INTERVAL → "skipped — busy" deadlock
+    //   • Pool is refilled via admin "Manual Paste" or the explicit "Sync Live" button
     await deliverOtps();
-
-    // 2) Numbers → pool (only if there are active allocations or pool is healthy)
-    const nums = await scrapeNumbers().catch((e) => { dwarn('[ims-bot] scrapeNumbers:', e.message); return []; });
-    if (nums.length) {
-      const sysUser = ensurePoolUser();
-      const exists = db.prepare("SELECT 1 FROM allocations WHERE provider='ims' AND phone_number=? LIMIT 1");
-      const ins = db.prepare(`
-        INSERT INTO allocations (user_id, provider, phone_number, country_code, operator, status, allocated_at)
-        VALUES (?, 'ims', ?, ?, ?, 'pool', strftime('%s','now'))
-      `);
-      let added = 0;
-      const tx = db.transaction((arr) => {
-        for (const n of arr) {
-          if (exists.get(n.phone_number)) continue;
-          ins.run(sysUser.id, n.phone_number, null, n.operator || null);
-          added++;
-        }
-      });
-      tx(nums);
-      status.numbersScrapedTotal += nums.length;
-      status.numbersAddedTotal += added;
-      if (added) {
-        console.log(`[ims-bot] pool: +${added} new numbers (total scraped ${nums.length})`);
-        logEvent('success', `Pool +${added} new numbers`, { scraped: nums.length });
-      }
-    }
-
-    // Auto-pause: track consecutive empty scrapes
-    if (nums.length === 0) {
-      emptyStreak++;
-      if (emptyStreak >= EMPTY_LIMIT) {
-        const msg = `IMS bot auto-paused: ${EMPTY_LIMIT} consecutive empty scrapes`;
-        console.warn(`[ims-bot] ${msg}`);
-        logEvent('warn', msg);
-        notifyAdmins('IMS Bot Auto-Paused', `No numbers found in last ${EMPTY_LIMIT} scrapes. Bot stopped to save resources. Click Start when IMS has stock.`, 'warning');
-        await stop();
-        emptyStreak = 0;
-        return;
-      }
-    } else {
-      emptyStreak = 0;
-    }
+    const nums = []; // numbers scrape disabled — see above. Set empty so auto-pause logic works.
+    // Auto-pause disabled — numbers scrape removed, so empty-streak no longer applies.
+    emptyStreak = 0;
 
     consecFail = 0;
     status.consecFail = 0;
