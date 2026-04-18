@@ -387,7 +387,9 @@ async function scrapeNumbers() {
 // IMS shows newest entries first (sorted by DATE desc) — we preserve that order
 // so the latest OTP wins when the same number appears multiple times.
 async function scrapeOtps() {
-  await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'networkidle2', timeout: 25000 }).catch(() => null);
+  // Use 'domcontentloaded' instead of 'networkidle2' — IMS pages have constant AJAX
+  // polling so networkidle never fires, causing 25s timeouts on every scrape.
+  await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
   if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
 
   // CRITICAL: IMS SMSCDRStats page renders an EMPTY table by default —
@@ -498,7 +500,13 @@ async function tick() {
     //   • IMS My-SMS-Numbers page has 17k+ rows → pagination takes 90-180s
     //   • That hangs the tick longer than INTERVAL → "skipped — busy" deadlock
     //   • Pool is refilled via admin "Manual Paste" or the explicit "Sync Live" button
-    await deliverOtps();
+    // Hard 30s cap on the OTP scrape — if puppeteer hangs (CDR page stalls, AJAX
+    // never settles, etc.) we abort and let the next tick try fresh. Without this
+    // a single hung evaluate() blocks every subsequent tick forever.
+    await Promise.race([
+      deliverOtps(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('deliverOtps timeout 30s')), 30000)),
+    ]);
     const nums = []; // numbers scrape disabled — see above. Set empty so auto-pause logic works.
     // Auto-pause disabled — numbers scrape removed, so empty-streak no longer applies.
     emptyStreak = 0;
@@ -676,7 +684,10 @@ async function pollOtpsNow() {
   otpBusy = true;
   _otpBusyStartedAt = Date.now();
   try {
-    const delivered = await deliverOtps();
+    const delivered = await Promise.race([
+      deliverOtps(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('fast-poll timeout 25s')), 25000)),
+    ]);
     status.lastScrapeAt = Math.floor(Date.now() / 1000);
     status.lastScrapeOk = true;
     if (typeof delivered === 'number' && delivered > 0) {
