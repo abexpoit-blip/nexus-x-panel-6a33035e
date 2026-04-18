@@ -617,51 +617,57 @@ function getRecentOtpFor(phone) {
 
 // Helper: pull OTPs once and credit any matching active allocations.
 // Used by tick() AND by the lightweight `pollOtpsNow()` fast-poll loop.
+//
+// Backfill behaviour: on every scrape we (a) update the recentOtpCache with
+// the LATEST OTP per phone seen, then (b) for EVERY active+otp-pending
+// allocation we look up its phone in the cache and deliver if found.
+// This means historical OTPs already on the IMS panel are picked up the next
+// scrape after a number is assigned — no need to wait for a brand-new SMS.
 async function deliverOtps() {
   const otpsRaw = await scrapeOtps().catch((e) => { dwarn('[ims-bot] scrapeOtps:', e.message); return []; });
-  if (!otpsRaw.length) return 0;
-  const seenPhones = new Set();
-  const otps = [];
   const nowSec = Math.floor(Date.now() / 1000);
+  // (a) Refresh cache. otpsRaw is newest-first per scrapeOtps(); the FIRST
+  // entry per phone is the most recent SMS, so we always overwrite older
+  // cache entries with the freshest OTP.
+  const seenInThisScrape = new Set();
   for (const o of otpsRaw) {
-    // Populate the recent-OTP cache so pre-allocation check can see "this number was used".
-    // Always update with the LATEST OTP for each phone (otpsRaw is newest-first per scrapeOtps).
-    if (!recentOtpCache.has(o.phone_number)) {
-      recentOtpCache.set(o.phone_number, {
-        otp_code: o.otp_code,
-        date_ts: o.date_ts || nowSec,
-        sms_text: o.sms_text,
-        cachedAt: nowSec,
-      });
-    }
-    if (seenPhones.has(o.phone_number)) continue;
-    seenPhones.add(o.phone_number);
-    otps.push(o);
+    if (seenInThisScrape.has(o.phone_number)) continue;
+    seenInThisScrape.add(o.phone_number);
+    recentOtpCache.set(o.phone_number, {
+      otp_code: o.otp_code,
+      date_ts: o.date_ts || nowSec,
+      sms_text: o.sms_text,
+      cachedAt: nowSec,
+    });
   }
+  // (b) Backfill: walk EVERY active IMS allocation that still has otp=NULL
+  // and try to match against the cache. Covers both fresh OTPs from this
+  // scrape AND historical OTPs scraped earlier.
   let delivered = 0;
-  for (const o of otps) {
-    // Match the most recent ACTIVE allocation for this phone — but ONLY if the OTP
-    // arrived AFTER the agent allocated the number. Without this, agents would receive
-    // stale OTPs from previous users of the same recycled number.
-    // Grace: 60s before allocation (clock skew + IMS slight delays).
-    const a = db.prepare(`
+  let pending = [];
+  try {
+    pending = db.prepare(`
       SELECT * FROM allocations
-      WHERE provider='ims' AND phone_number=? AND status='active' AND otp IS NULL
-      ORDER BY allocated_at DESC LIMIT 1
-    `).get(o.phone_number);
-    if (a) {
-      const allocAt = +a.allocated_at || 0;
-      // o.date_ts may be 0 if IMS didn't return a parseable date — accept in that case.
-      if (o.date_ts && allocAt && o.date_ts < (allocAt - 60)) {
-        // OTP is older than the allocation — this is a stale OTP from a previous user.
-        // Skip it (don't mark a fresh allocation with old data).
-        continue;
-      }
-      await markOtpReceived(a, o.otp_code);
+      WHERE provider='ims' AND status='active' AND otp IS NULL
+      ORDER BY allocated_at DESC
+    `).all();
+  } catch (_) { pending = []; }
+  for (const a of pending) {
+    const cached = recentOtpCache.get(a.phone_number);
+    if (!cached) continue;
+    const allocAt = +a.allocated_at || 0;
+    // Stale-OTP guard: if the cached OTP arrived more than 60s BEFORE the
+    // allocation, it's from a previous user — skip. (date_ts=0 means we
+    // couldn't parse a date, so we accept it.)
+    if (cached.date_ts && allocAt && cached.date_ts < (allocAt - 60)) continue;
+    try {
+      await markOtpReceived(a, cached.otp_code);
       status.otpsDeliveredTotal++;
       delivered++;
-      console.log(`[ims-bot] OTP delivered: ${o.phone_number} → ${o.otp_code} (alloc#${a.id})`);
-      logEvent('success', `OTP delivered to ${o.phone_number}`, { otp: o.otp_code, alloc: a.id });
+      console.log(`[ims-bot] OTP delivered: ${a.phone_number} → ${cached.otp_code} (alloc#${a.id})`);
+      logEvent('success', `OTP delivered to ${a.phone_number}`, { otp: cached.otp_code, alloc: a.id });
+    } catch (e) {
+      dwarn(`[ims-bot] markOtpReceived failed for ${a.phone_number}:`, e.message);
     }
   }
   return delivered;
