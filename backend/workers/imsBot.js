@@ -428,7 +428,10 @@ let _cdrPageReady = false;
 
 async function scrapeOtps() {
   if (!page) throw new Error('page not ready');
+  const _t0 = Date.now();
+  const _step = (label) => console.log(`[ims-bot][scrape] ${label} (+${Date.now() - _t0}ms)`);
   const onCdrPage = /SMSCDRStats/i.test(page.url());
+  _step(`start onCdrPage=${onCdrPage} cdrReady=${_cdrPageReady}`);
 
   if (!onCdrPage || !_cdrPageReady) {
     // First visit (or after logout) — full navigation.
@@ -478,6 +481,7 @@ async function scrapeOtps() {
     }
   }
 
+  _step('navigation/reload done');
   // Wait briefly for IMS DataTables AJAX to populate the table after page load.
   await page.waitForFunction(
     () => {
@@ -489,8 +493,9 @@ async function scrapeOtps() {
     },
     { timeout: 6000 }
   ).catch(() => null);
+  _step('table populated');
 
-  return await page.evaluate(() => {
+  const out = await page.evaluate(() => {
     const out = [];
     document.querySelectorAll('table tbody tr').forEach((row) => {
       const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
