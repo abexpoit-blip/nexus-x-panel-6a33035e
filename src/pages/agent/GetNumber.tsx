@@ -224,7 +224,10 @@ const AgentGetNumber = () => {
     }
   };
 
-  // Poll OTP sync every 5s while there are pending numbers
+  // Poll OTP sync every 5s while there are pending numbers.
+  // When a poll reveals NEW OTPs (numbers that previously had no OTP but now do),
+  // we flash their rows green for 8s + toast which number got it. This makes it
+  // dead-obvious which row in a 100-number list just received its code.
   useEffect(() => {
     const pending = numbers.filter((n) => !n.otp).length;
     if (pending === 0) return;
@@ -232,7 +235,33 @@ const AgentGetNumber = () => {
       try {
         await api.syncOtp();
         const { numbers: fresh } = await api.myNumbers();
-        setNumbers(fresh as AllocatedNumber[]);
+        const freshList = fresh as AllocatedNumber[];
+        // Diff: which previously-pending IDs now have an OTP?
+        const prevPendingIds = new Set(numbers.filter((n) => !n.otp).map((n) => n.id));
+        const newlyReceived = freshList.filter((n) => n.otp && prevPendingIds.has(n.id));
+        if (newlyReceived.length > 0) {
+          setFlashOtpIds((prev) => {
+            const next = new Set(prev);
+            newlyReceived.forEach((n) => next.add(n.id));
+            return next;
+          });
+          // Auto-clear flash after 8s so the highlight is temporary
+          setTimeout(() => {
+            setFlashOtpIds((prev) => {
+              const next = new Set(prev);
+              newlyReceived.forEach((n) => next.delete(n.id));
+              return next;
+            });
+          }, 8000);
+          // Toast — show which number(s) got OTP
+          newlyReceived.slice(0, 3).forEach((n) => {
+            toast({
+              title: `OTP received: ${n.phone_number}`,
+              description: `Code: ${n.otp}`,
+            });
+          });
+        }
+        setNumbers(freshList);
       } catch { /* ignore */ }
     }, 5000);
     return () => clearInterval(interval);
