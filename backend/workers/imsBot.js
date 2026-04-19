@@ -1285,17 +1285,33 @@ async function pollOtpsNow() {
     const elapsed = Date.now() - _pollT0;
     _consecFastFails++;
     // Don't flip lastScrapeOk to false on a single fast-poll timeout — heavy tick owns that flag.
-    // Just record the error so admin can see it in the panel.
     status.lastError = `fast-poll: ${e.message} (after ${elapsed}ms, fail#${_consecFastFails})`;
     status.lastErrorAt = Math.floor(Date.now() / 1000);
     console.warn(`[ims-bot] otp-poll failed after ${elapsed}ms (consec=${_consecFastFails}):`, e.message);
-    logEvent('warn', `Fast-poll failed (#${_consecFastFails}): ${e.message}`);
+    // Only surface to admin panel as WARN if 2+ consecutive — single hiccups
+    // are normal on slow IMS days and create false-alarm panic.
+    if (_consecFastFails >= 2) {
+      logEvent('warn', `Fast-poll failed (#${_consecFastFails}): ${e.message}`);
+    } else {
+      logEvent('info', `Fast-poll slow tick recovered: ${e.message} (will retry)`);
+    }
 
-    // After 5 consecutive fast-poll failures, recycle the browser — likely a
-    // hung puppeteer page or stale session that won't recover on its own.
-    if (_consecFastFails >= 5) {
-      console.warn('[ims-bot] 5 consecutive fast-poll fails — recycling browser');
-      logEvent('warn', 'Recycling browser after 5 fast-poll failures');
+    // FAST RECOVERY: on first fail, force-reload CDR page (stuck AJAX reset).
+    // Cheaper than full browser recycle and usually fixes frozen-table cases.
+    if (_consecFastFails === 1 && page && loggedIn) {
+      try {
+        console.log('[ims-bot] fast-poll fail #1 — force-reloading CDR page');
+        _cdrPageReady = false;
+        await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      } catch (re) {
+        console.warn('[ims-bot] CDR page reload failed:', re.message);
+      }
+    }
+
+    // After 3 consecutive fast-poll failures, recycle the browser (was 5 — too slow).
+    if (_consecFastFails >= 3) {
+      console.warn('[ims-bot] 3 consecutive fast-poll fails — recycling browser');
+      logEvent('warn', 'Recycling browser after 3 fast-poll failures');
       try { await browser?.close(); } catch (_) {}
       browser = null; page = null; loggedIn = false; _cdrPageReady = false;
       status.loggedIn = false;
