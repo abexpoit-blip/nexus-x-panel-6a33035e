@@ -743,15 +743,37 @@ async function scrapeOtps() {
       consecEvalTimeouts++;
       _step(`poll attempt ${i + 1} timed out (${e.message})`);
       if (consecEvalTimeouts >= 3) {
-        _step(`page frozen (${consecEvalTimeouts} consec eval timeouts) — FULL BROWSER RECYCLE`);
-        _cdrPageReady = false;
-        // Force-close the frozen browser. Next tick will re-launch fresh.
-        // Just marking _cdrPageReady=false isn't enough — page.goto() on a
-        // frozen page also hangs, so we need a clean browser restart.
-        try { await Promise.race([browser?.close(), new Promise(r => setTimeout(r, 3000))]); } catch (_) {}
-        browser = null; page = null; loggedIn = false;
-        status.loggedIn = false;
-        logEvent('warn', 'Browser recycled — page.evaluate frozen 3x at 8s');
+        // SOFT-RECOVERY first (per user spec): Dashboard → Stats re-navigation.
+        // Only fall back to FULL BROWSER RECYCLE if soft-recovery itself fails.
+        let softOk = false;
+        try {
+          _step(`page frozen (3x) — trying SOFT-RECOVERY (Dashboard → Stats)`);
+          await Promise.race([
+            (async () => {
+              await page.goto(`${BASE_URL}/client/Dashboard`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+              await new Promise(r => setTimeout(r, 3000));
+              await page.goto(`${BASE_URL}/client/SMSCDRStats`, { waitUntil: 'networkidle2', timeout: 20000 });
+            })(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('soft-recovery timeout 25s')), 25000)),
+          ]);
+          await Promise.race([
+            page.evaluate(() => document.title),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('post-recovery eval timeout')), 5000)),
+          ]);
+          softOk = true;
+          _cdrPageReady = false; // next tick re-runs prep (15s + page-size 100 + 15s + Show Report)
+          _step(`SOFT-RECOVERY succeeded — next tick will re-prep`);
+          logEvent('info', 'IMS soft-recovery (Dashboard→Stats) succeeded — no browser recycle');
+        } catch (recErr) {
+          _step(`SOFT-RECOVERY failed (${recErr.message}) — FULL BROWSER RECYCLE`);
+        }
+        if (!softOk) {
+          _cdrPageReady = false;
+          try { await Promise.race([browser?.close(), new Promise(r => setTimeout(r, 3000))]); } catch (_) {}
+          browser = null; page = null; loggedIn = false;
+          status.loggedIn = false;
+          logEvent('warn', 'Browser recycled — frozen 3x and soft-recovery failed');
+        }
         break;
       }
     }
@@ -760,18 +782,13 @@ async function scrapeOtps() {
   _step(`table populated=${populated}${rateLimited ? ' (RATE-LIMITED — bot polling too fast!)' : ''}`);
   if (rateLimited) {
     logEvent('warn', 'IMS rate-limit warning row seen — bot polling faster than 15s');
-    // Rate-limit warning means our short-circuit show-report click hit IMS too fast.
-    // Force next tick to re-run FULL sequence (date+page-size+show with 15s cooldowns).
+    // Rate-limit warning means we hit IMS too fast. Force re-prep with full cooldowns.
     _cdrPageReady = false;
   }
-  // OLD WORKING LOGIC RESTORED: re-run FULL sequence every poll cycle.
-  // The "click Show Report only" shortcut was causing page.evaluate() to freeze
-  // because IMS DataTables enters a bad state without the date/page-size reset.
-  // The 48s overhead is acceptable — old bot worked reliably with this exact flow.
-  if (populated) {
-    _cdrPageReady = false;
-    _step('full-sequence mode: next poll will re-run date+page-size+show-report');
-  }
+  // KEEP SESSION ALIVE on success — do NOT reset _cdrPageReady.
+  // Per user spec: prep once (15s + page-size 100 + 15s + Show Report), then for
+  // the next 5 min just click "Show Report" only. No re-prep. This eliminates the
+  // freeze loop caused by repeated page-size dispatch on the same DataTables instance.
 
   // Debug snapshot — when populated check fails, dump page diagnostics so we
   // can see WHY (wrong selector? page in different state? login redirect?).
