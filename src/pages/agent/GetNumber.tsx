@@ -322,19 +322,64 @@ const AgentGetNumber = () => {
               return next;
             });
           }, 8000);
-          // Toast — show which number(s) got OTP
+          // Sound alert (single beep for the whole batch)
+          playBeep();
+          // Toast + desktop notif — show which number(s) got OTP
           newlyReceived.slice(0, 3).forEach((n) => {
             toast({
               title: `OTP received: ${n.phone_number}`,
               description: `Code: ${n.otp}`,
             });
           });
+          // Desktop popup (only fires if tab hidden)
+          const first = newlyReceived[0];
+          const more = newlyReceived.length > 1 ? ` (+${newlyReceived.length - 1} more)` : "";
+          showDesktopNotif(
+            `OTP received${more}`,
+            `${first.phone_number} → ${first.otp}`
+          );
         }
         setNumbers(freshList);
       } catch { /* ignore */ }
     }, 5000);
     return () => clearInterval(interval);
   }, [numbers]);
+
+  // Auto-release expired numbers — runs every 15s while toggle is ON.
+  // Releases anything that has been expired for >60s (grace period in case
+  // OTP arrives late). Each ID released only once per session.
+  useEffect(() => {
+    if (!autoRelease) return;
+    const sweep = async () => {
+      const nowS = Math.floor(Date.now() / 1000);
+      const toRelease = numbers.filter((n) => {
+        if (n.otp) return false;
+        if (autoReleasedIds.current.has(n.id)) return false;
+        const allocAt = n.allocated_at || nowS;
+        const expiredFor = nowS - allocAt - expirySec;
+        return expiredFor >= 60; // 60s grace
+      });
+      if (toRelease.length === 0) return;
+      const releasedIds: number[] = [];
+      for (const n of toRelease) {
+        autoReleasedIds.current.add(n.id);
+        try {
+          await api.releaseNumber(n.id);
+          releasedIds.push(n.id);
+        } catch { /* ignore individual failures */ }
+      }
+      if (releasedIds.length > 0) {
+        setNumbers((prev) => prev.filter((x) => !releasedIds.includes(x.id)));
+        toast({
+          title: `Auto-released ${releasedIds.length} expired number${releasedIds.length > 1 ? "s" : ""}`,
+          description: "Toggle off if you want to keep expired numbers visible",
+        });
+      }
+    };
+    const i = setInterval(sweep, 15000);
+    sweep(); // run once immediately on toggle-on
+    return () => clearInterval(i);
+  }, [autoRelease, numbers, expirySec]);
 
   const copyItem = (id: number, text: string, type: "num" | "otp") => {
     navigator.clipboard.writeText(text);
