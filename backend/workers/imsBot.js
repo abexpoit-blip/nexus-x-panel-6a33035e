@@ -678,18 +678,24 @@ async function scrapeOtps() {
       _step(`skip show-report click — only ${sinceLast}ms since last (IMS 15s rule)`);
     } else {
       try {
+        // Short AJAX wait — if IMS serves from cache or matcher misses, don't hang here.
         const xhrWait = page.waitForResponse(
           (r) => /SMSCDRStats|datatables|ajax/i.test(r.url()) && r.request().method() !== 'OPTIONS',
-          { timeout: 25000 }
+          { timeout: 8000 }
         ).catch(() => null);
-        await page.evaluate(() => {
-          const btns = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a'));
-          const showBtn = btns.find(b => /show\s*report/i.test((b.innerText || b.value || '').trim()));
-          if (showBtn) showBtn.click();
-        });
+        // Wrap click-evaluate in race so a frozen page can't hang us forever
+        await Promise.race([
+          page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a'));
+            const showBtn = btns.find(b => /show\s*report/i.test((b.innerText || b.value || '').trim()));
+            if (showBtn) showBtn.click();
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('click-evaluate timeout 5s')), 5000)),
+        ]);
+        _step('show-report clicked, waiting AJAX (max 8s)');
         const resp = await xhrWait;
         _lastShowReportAt = Date.now();
-        _step(`show-report click ${resp ? 'AJAX ' + resp.status() : 'no-AJAX (cached?)'}`);
+        _step(`show-report ${resp ? 'AJAX ' + resp.status() : 'no-AJAX (proceeding anyway)'}`);
       } catch (e) {
         _step(`show-report failed (${e.message}) — recycling page next tick`);
         _cdrPageReady = false;
