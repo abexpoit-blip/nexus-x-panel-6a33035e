@@ -598,7 +598,8 @@ const AgentGetNumber = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-[auto_1fr_120px_100px_90px_80px] gap-3 px-4 py-2 text-xs font-semibold text-muted-foreground border-b border-white/[0.06] mb-1">
+          <div className="grid grid-cols-[36px_auto_1fr_120px_100px_90px_80px] gap-3 px-4 py-2 text-xs font-semibold text-muted-foreground border-b border-white/[0.06] mb-1">
+            <span className="text-center">#</span>
             <span className="w-2" />
             <span>Number</span>
             <span>Operator</span>
@@ -608,7 +609,7 @@ const AgentGetNumber = () => {
           </div>
 
           <div className="space-y-1">
-            {pageItems.map((n) => {
+            {pageItems.map((n, idx) => {
               const allocAt = n.allocated_at || nowTick;
               // For received OTPs: show how long it took to arrive.
               // For pending: show REMAINING time before expiry (counts down).
@@ -616,17 +617,35 @@ const AgentGetNumber = () => {
               const remaining = Math.max(0, expirySec - elapsed);
               const tookSec = n.otp && n.otp_received_at ? n.otp_received_at - allocAt : 0;
               const isExpired = !n.otp && remaining <= 0;
+              const serial = start + idx + 1; // global serial across pages
+              const isFlashing = flashOtpIds.has(n.id);
               return (
               <div
                 key={n.id}
-                className="grid grid-cols-[auto_1fr_120px_100px_90px_80px] gap-3 items-center px-4 py-3 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition-colors"
+                className={cn(
+                  "grid grid-cols-[36px_auto_1fr_120px_100px_90px_80px] gap-3 items-center px-4 py-3 rounded-lg border transition-all duration-300",
+                  isFlashing
+                    ? "bg-neon-green/[0.12] border-neon-green/60 shadow-[0_0_24px_-4px_hsl(var(--neon-green)/0.55)] ring-1 ring-neon-green/40 animate-pulse"
+                    : n.otp
+                      ? "bg-neon-green/[0.04] border-neon-green/20 hover:bg-neon-green/[0.08]"
+                      : "bg-white/[0.02] border-white/[0.04] hover:bg-white/[0.04]"
+                )}
               >
+                <span className={cn(
+                  "text-[11px] font-mono font-semibold text-center tabular-nums",
+                  n.otp ? "text-neon-green" : "text-muted-foreground"
+                )}>
+                  {serial}
+                </span>
                 <div className={cn(
                   "w-2 h-2 rounded-full",
                   n.otp ? "bg-neon-green" : isExpired ? "bg-neon-red" : n.status === "active" ? "bg-neon-amber animate-pulse" : "bg-neon-red"
                 )} />
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-mono text-foreground">{n.phone_number}</span>
+                  <span className={cn(
+                    "text-sm font-mono",
+                    n.otp ? "text-neon-green font-semibold" : "text-foreground"
+                  )}>{n.phone_number}</span>
                   <button
                     onClick={() => copyItem(n.id, n.phone_number, "num")}
                     className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground hover:text-primary transition-colors"
