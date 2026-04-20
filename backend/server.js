@@ -91,6 +91,7 @@ app.use('/api/rates', require('./routes/rates'));
 app.use('/api/cdr', require('./routes/cdr'));
 app.use('/api', require('./routes/payments'));            // /payments + /withdrawals
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/leaderboard', require('./routes/leaderboard'));
 app.use('/api', require('./routes/security'));            // /audit + /sessions + /settings
 
 // Health
