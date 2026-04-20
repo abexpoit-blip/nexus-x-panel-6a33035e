@@ -715,6 +715,7 @@ const AdminNumPanelStatus = () => {
               ranges={poolData?.ranges || []}
               totalActive={poolData?.totalActive || 0}
               totalUsed={poolData?.totalUsed || 0}
+              provider="numpanel"
               onChanged={() => refetchPool()}
             />
           </div>
