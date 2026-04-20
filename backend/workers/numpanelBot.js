@@ -94,12 +94,14 @@ try {
   }
 } catch (_) {}
 
-let { ENABLED, BASE_URL, USERNAME, PASSWORD } = resolveCreds();
+let { ENABLED, BASE_URL, USERNAME, PASSWORD, API_TOKEN, API_BASE } = resolveCreds();
 const HEADLESS = String(process.env.NUMPANEL_HEADLESS || 'true').toLowerCase() !== 'false';
 const CHROME_PATH = process.env.NUMPANEL_CHROME_PATH || undefined;
 let OTP_INTERVAL = resolveOtpInterval();
 const NUMBERS_INTERVAL = Math.max(60, +(process.env.NUMPANEL_NUMBERS_INTERVAL || 600));
 const EMPTY_LIMIT = Math.max(0, +(process.env.NUMPANEL_EMPTY_LIMIT || 0)); // 0 = disabled by default for NUMPANEL
+// How many numbers to claim per range each pool-sync cycle (clicks REQUEST button N times per range)
+const REQUEST_PER_RANGE = Math.max(0, +(process.env.NUMPANEL_REQUEST_PER_RANGE || 3));
 
 let browser = null;
 let page = null;
