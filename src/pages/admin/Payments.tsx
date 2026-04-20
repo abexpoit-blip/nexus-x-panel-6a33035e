@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, type PaymentConfig } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
 import { GlassCard } from "@/components/GlassCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wallet, Plus, Check, X, Clock } from "lucide-react";
+import { Wallet, Plus, Check, X, Clock, Settings as SettingsIcon, Save } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+const METHOD_LABELS: Record<string, string> = {
+  bkash: "bKash", nagad: "Nagad", rocket: "Rocket", bank: "Bank Transfer", crypto: "Crypto (USDT)",
+};
 
 const statusBadge = (s: string) => cn(
   "px-2 py-0.5 rounded text-xs font-semibold uppercase",
