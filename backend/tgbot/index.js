@@ -139,7 +139,7 @@ function isBanned(tgUser) { return tgUser && tgUser.status === 'banned'; }
 function mainMenuKeyboard() {
   return Markup.keyboard([
     ['🌍 Get Number', '📞 My Numbers'],
-    ['📥 OTP History', '🏆 Leaderboard'],
+    ['📥 OTP History', '🔍 Active Range Checker'],
     ['💰 Wallet', 'ℹ️ Support'],
   ]).resize();
 }
