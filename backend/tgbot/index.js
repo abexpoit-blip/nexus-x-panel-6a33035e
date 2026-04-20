@@ -46,24 +46,36 @@ function getBotConfig() {
     `).all();
     const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
     return {
-      publicChannel: map.tg_public_channel || '',
-      requiredGroup: map.tg_required_group || 'https://t.me/nexusxotpbot',
-      requiredGroupChat: map.tg_required_group_chat || '',
+      publicChannel: map.tg_public_channel || '@nexusxotpgroup',
+      requiredGroup: map.tg_required_group || 'https://t.me/nexusxotpgroup',
+      requiredGroupChat: map.tg_required_group_chat || '@nexusxotpgroup',
       otpGroup: map.tg_required_otp_group || 'https://t.me/+6RUOKrkz6YU1Yjk1',
       otpGroupChat: map.tg_required_otp_group_chat || '',
       terms: map.tg_terms_text || 'By using this bot you agree to follow our rules, keep OTP data private, and use numbers responsibly.',
     };
   } catch {
     return {
-      publicChannel: '',
-      requiredGroup: 'https://t.me/nexusxotpbot',
-      requiredGroupChat: '',
+      publicChannel: '@nexusxotpgroup',
+      requiredGroup: 'https://t.me/nexusxotpgroup',
+      requiredGroupChat: '@nexusxotpgroup',
       otpGroup: 'https://t.me/+6RUOKrkz6YU1Yjk1',
       otpGroupChat: '',
       terms: 'By using this bot you agree to follow our rules, keep OTP data private, and use numbers responsibly.',
     };
   }
 }
+
+// Seed the public channel on boot if admin hasn't set it yet — so fake-OTP works out of the box
+function seedDefaults() {
+  try {
+    const stmt = db.prepare(`INSERT OR IGNORE INTO settings (key, value, updated_at)
+      VALUES (?, ?, strftime('%s','now'))`);
+    stmt.run('tg_public_channel', '@nexusxotpgroup');
+    stmt.run('tg_required_group', 'https://t.me/nexusxotpgroup');
+    stmt.run('tg_required_group_chat', '@nexusxotpgroup');
+  } catch (e) { console.warn('[seedDefaults]', e.message); }
+}
+seedDefaults();
 
 const bot = new Telegraf(TOKEN);
 
