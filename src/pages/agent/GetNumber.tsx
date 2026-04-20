@@ -453,8 +453,8 @@ const AgentGetNumber = () => {
           </div>
         </div>
 
-        {provider === "ims" ? (
-          /* ============ Server B (IMS): single Range dropdown ============ */
+        {provider === "ims" || provider === "msi" ? (
+          /* ============ Server B/C (range-based): single Range dropdown ============ */
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-end">
             <div className="space-y-2 relative" ref={rangeRef}>
               <label className="text-sm font-medium text-muted-foreground flex items-center justify-between">
