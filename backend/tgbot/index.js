@@ -114,6 +114,18 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
+// Mask last 4 digits with 'XXXX' (e.g. 95415646XXXX)
+function maskLast4(s) {
+  if (!s) return '';
+  const str = String(s);
+  if (str.length <= 4) return 'XXXX';
+  return str.slice(0, str.length - 4) + 'XXXX';
+}
+
+function newBatchId() {
+  return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 // ---------- Country list (only TG-enabled ranges with pool > 0) ----------
 // Country code is inferred from range_name when allocations.country_code is missing
 function listCountries() {
@@ -186,7 +198,67 @@ function getActiveAssignments(tgUserId) {
   `).all(tgUserId, now());
 }
 
-// ---------- Render the number card ----------
+// ---------- Render ONE compact card listing all numbers in a batch ----------
+function renderBatchCard(assignments) {
+  if (!assignments || assignments.length === 0) return '📭 No numbers.';
+  const live = assignments.filter(a => a.status !== 'released');
+  const head = live[0] || assignments[0];
+  const cc = bestCountryCode(head.country_code, head.range_name);
+  const flag = flagOf(cc);
+  const cName = countryName(cc);
+  const svc = head.service ? `${serviceIcon(head.service)} ${head.service}` : '📡 SMS';
+  const remaining = Math.max(0, head.expires_at - now());
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  const timer = `⏱ ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+  const gotOtps = assignments.filter(a => a.status === 'otp_received' && a.otp_code);
+  const copyAll = gotOtps.map(a => `${a.phone_number}|${a.otp_code}`).join('\n');
+
+  let txt =
+    `📱 <b>Your Numbers (${assignments.length})</b>\n` +
+    `${flag} <b>${escapeHtml(cName)}</b> — ${svc}\n` +
+    `${timer} until expiry • Rate: ${fmtBdt(head.rate_bdt)} per OTP\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n`;
+
+  assignments.forEach((a, i) => {
+    const idx = `${(i + 1).toString().padStart(2, '0')}.`;
+    if (a.status === 'otp_received' && a.otp_code) {
+      txt += `✅ ${idx} <code>${a.phone_number}|${escapeHtml(a.otp_code)}</code>\n`;
+    } else if (a.status === 'expired' || a.status === 'released') {
+      txt += `⛔ ${idx} <s>${a.phone_number}</s>\n`;
+    } else {
+      txt += `⏳ ${idx} <code>${a.phone_number}</code>\n`;
+    }
+  });
+
+  if (gotOtps.length > 0) {
+    txt += `━━━━━━━━━━━━━━━━━━━━\n📋 <b>Copy ALL received (${gotOtps.length}):</b>\n<code>${escapeHtml(copyAll)}</code>`;
+  } else {
+    txt += `\n<i>Tap any number above to copy. OTPs arrive here automatically.</i>`;
+  }
+  return txt;
+}
+
+function batchKeyboard(batchId, allDone) {
+  const rows = [];
+  if (!allDone) {
+    rows.push([
+      Markup.button.callback('🗑 Release Unused', `releaseBatch:${batchId}`),
+      Markup.button.callback('🌍 Get More', 'menu:get'),
+    ]);
+  } else {
+    rows.push([Markup.button.callback('🌍 Get Another Batch', 'menu:get')]);
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+// Fetch batch assignments in stable order
+function getBatchAssignments(batchId) {
+  return db.prepare(`SELECT * FROM tg_assignments WHERE batch_id = ? ORDER BY id ASC`).all(batchId);
+}
+
+// ---------- Legacy single-card render (used by My Numbers list) ----------
 function renderNumberCard(a) {
   const cc = bestCountryCode(a.country_code, a.range_name);
   const flag = flagOf(cc);
@@ -196,40 +268,22 @@ function renderNumberCard(a) {
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
   const timer = `⏱ ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-
   if (a.status === 'otp_received' && a.otp_code) {
     return (
-      `✅ <b>OTP Received!</b>\n\n` +
-      `📞 Number: <code>${a.phone_number}</code>\n` +
-      `${flag} Country: <b>${escapeHtml(cName)}</b>\n` +
-      `🔧 Service: <b>${escapeHtml(a.service || '—')}</b>\n` +
-      `🔑 Code: <code>${escapeHtml(a.otp_code)}</code>\n\n` +
-      `📋 <b>Tap to copy (Number|OTP):</b>\n` +
-      `<code>${a.phone_number}|${escapeHtml(a.otp_code)}</code>\n\n` +
-      (a.otp_full_text ? `💬 Full message:\n<code>${escapeHtml(a.otp_full_text).slice(0, 400)}</code>` : '')
+      `✅ ${flag} ${escapeHtml(cName)} — ${svc}\n` +
+      `📋 <code>${a.phone_number}|${escapeHtml(a.otp_code)}</code>\n` +
+      `<i>${fmtAgo(a.otp_received_at)}</i>`
     );
   }
   return (
-    `📱 <b>Your Number is Ready!</b>\n\n` +
-    `${flag} <b>${escapeHtml(cName)}</b> — ${svc}\n` +
-    `📋 Tap to copy:\n<code>${a.phone_number}</code>\n\n` +
-    `${timer} until expiry • Rate: ${fmtBdt(a.rate_bdt)}\n` +
-    `Keep this chat open — incoming OTP will arrive here.`
+    `📱 ${flag} ${escapeHtml(cName)} — ${svc}\n` +
+    `📋 <code>${a.phone_number}</code>\n` +
+    `${timer} until expiry`
   );
 }
 
-function numberCardKeyboard(assignmentId, hasOtp) {
-  if (hasOtp) {
-    return Markup.inlineKeyboard([
-      [Markup.button.callback('🔄 Get Another Number', 'menu:get')],
-      [Markup.button.callback('📞 My Active Numbers', 'menu:mine')],
-    ]);
-  }
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('🔁 Change Number', `change:${assignmentId}`),
-     Markup.button.callback('🗑 Release', `release:${assignmentId}`)],
-    [Markup.button.callback('🌍 Get Another (different)', 'menu:get')],
-  ]);
+function numberCardKeyboard() {
+  return Markup.inlineKeyboard([[Markup.button.callback('🌍 Get Number', 'menu:get')]]);
 }
 
 // ============================================================
@@ -365,40 +419,58 @@ bot.action(/^range:([^:]+):([^:]+):(\w+)$/, async (ctx) => {
   }
 
   const expiresAt = now() + EXPIRY_SEC;
+  const batchId = newBatchId();
   const insAssign = db.prepare(`
     INSERT INTO tg_assignments
-    (tg_user_id, allocation_id, provider, phone_number, country_code, range_name, service, rate_bdt, status, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+    (tg_user_id, allocation_id, provider, phone_number, country_code, range_name, service, rate_bdt, status, expires_at, batch_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
   `);
   const updAlloc = db.prepare("UPDATE allocations SET status='active' WHERE id = ?");
 
-  await ctx.replyWithHTML(
-    `✅ <b>${claimed.length} numbers reserved</b> in ${flagOf(cc)} ${countryName(cc)} — ${serviceIcon(setting.service)} ${rangeName}\n` +
-    `⏱ Expires in <b>${EXPIRY_MIN} minutes</b>. Unused will return to pool automatically.`
-  );
-
+  const createdIds = [];
   for (const c of claimed) {
     const r = insAssign.run(
       u.tg_user_id, c.id, provider, c.phone_number, c.country_code || cc,
-      rangeName, setting.service || null, rate, expiresAt
+      rangeName, setting.service || null, rate, expiresAt, batchId
     );
     updAlloc.run(c.id);
-    const card = {
-      id: r.lastInsertRowid,
-      phone_number: c.phone_number,
-      country_code: c.country_code || cc,
-      service: setting.service,
-      rate_bdt: rate,
-      expires_at: expiresAt,
-      status: 'active',
-    };
-    const sent = await ctx.replyWithHTML(renderNumberCard(card), numberCardKeyboard(card.id, false));
-    db.prepare('UPDATE tg_assignments SET tg_message_id = ?, tg_chat_id = ? WHERE id = ?')
-      .run(sent.message_id, sent.chat.id, card.id);
+    createdIds.push(r.lastInsertRowid);
   }
+
+  // Render ONE compact card with all numbers
+  const assignments = getBatchAssignments(batchId);
+  const sent = await ctx.replyWithHTML(renderBatchCard(assignments), batchKeyboard(batchId, false));
+  // Save chat+message id on every row so the poller can edit this one card
+  db.prepare('UPDATE tg_assignments SET tg_message_id = ?, tg_chat_id = ? WHERE batch_id = ?')
+    .run(sent.message_id, sent.chat.id, batchId);
 });
 
-// ----- Release / change actions -----
+// ----- Batch release (new) -----
+bot.action(/^releaseBatch:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Releasing unused…');
+  const batchId = ctx.match[1];
+  const u = ensureTgUser(ctx);
+  const rows = db.prepare(`SELECT * FROM tg_assignments WHERE batch_id = ? AND tg_user_id = ?`).all(batchId, u.tg_user_id);
+  if (rows.length === 0) return;
+  db.transaction(() => {
+    for (const a of rows) {
+      if (a.status === 'active') {
+        db.prepare("UPDATE tg_assignments SET status='released' WHERE id = ?").run(a.id);
+        db.prepare("UPDATE allocations SET status='pool' WHERE id = ? AND status='active'").run(a.allocation_id);
+      }
+    }
+  })();
+  const fresh = getBatchAssignments(batchId);
+  const allDone = !fresh.some(a => a.status === 'active');
+  try {
+    await ctx.editMessageText(renderBatchCard(fresh), {
+      parse_mode: 'HTML',
+      reply_markup: batchKeyboard(batchId, allDone).reply_markup,
+    });
+  } catch {}
+});
+
+// ----- Legacy release/change (kept for old one-card assignments) -----
 bot.action(/^release:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const id = +ctx.match[1];
@@ -410,41 +482,6 @@ bot.action(/^release:(\d+)$/, async (ctx) => {
     db.prepare("UPDATE allocations SET status='pool' WHERE id = ? AND status='active'").run(a.allocation_id);
   })();
   try { await ctx.editMessageText('🗑 Released. Number returned to pool.'); } catch {}
-});
-
-bot.action(/^change:(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Replacing…');
-  const id = +ctx.match[1];
-  const u = ensureTgUser(ctx);
-  const a = db.prepare('SELECT * FROM tg_assignments WHERE id = ? AND tg_user_id = ?').get(id, u.tg_user_id);
-  if (!a || a.status !== 'active') return ctx.reply('Already gone.');
-  // release old
-  db.transaction(() => {
-    db.prepare("UPDATE tg_assignments SET status='released' WHERE id = ?").run(id);
-    db.prepare("UPDATE allocations SET status='pool' WHERE id = ? AND status='active'").run(a.allocation_id);
-  })();
-  // claim new from same range
-  const [n] = claimBatch(a.provider, a.range_name, a.country_code, 1);
-  if (!n) return ctx.reply('⚠️ No fresh numbers — try another range.');
-  const expiresAt = now() + EXPIRY_SEC;
-  const r = db.prepare(`
-    INSERT INTO tg_assignments
-    (tg_user_id, allocation_id, provider, phone_number, country_code, range_name, service, rate_bdt, status, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-  `).run(u.tg_user_id, n.id, a.provider, n.phone_number, a.country_code, a.range_name, a.service, a.rate_bdt, expiresAt);
-  db.prepare("UPDATE allocations SET status='active' WHERE id = ?").run(n.id);
-  const card = {
-    id: r.lastInsertRowid, phone_number: n.phone_number, country_code: a.country_code,
-    service: a.service, rate_bdt: a.rate_bdt, expires_at: expiresAt, status: 'active',
-  };
-  try {
-    await ctx.editMessageText(renderNumberCard(card), {
-      parse_mode: 'HTML',
-      reply_markup: numberCardKeyboard(card.id, false).reply_markup,
-    });
-    db.prepare('UPDATE tg_assignments SET tg_message_id = ?, tg_chat_id = ? WHERE id = ?')
-      .run(ctx.callbackQuery.message.message_id, ctx.callbackQuery.message.chat.id, card.id);
-  } catch (e) { console.error('[tgbot] change edit err', e.message); }
 });
 
 // ============================================================
