@@ -667,7 +667,23 @@ const AdminMsiStatus = () => {
             <Pill ok={s.lastScrapeOk} label={s.lastScrapeOk ? "Last scrape OK" : "Last scrape failed"} />
           </div>
 
-          <CredentialsEditor onSaved={() => refetch()} />
+          <LockReveal
+            title="MSI Login Credentials"
+            subtitle="Username, password & base URL — sensitive. Click reveal to view/edit."
+            accent="neon-cyan"
+            icon={<Layers className="w-4 h-4 text-neon-cyan" />}
+          >
+            <CredentialsEditor onSaved={() => refetch()} />
+          </LockReveal>
+
+          <LockReveal
+            title="MSI Session Cookies"
+            subtitle="Saved browser session — paste once, skip captcha forever. Sensitive."
+            accent="neon-purple"
+            icon={<ClipboardPaste className="w-4 h-4 text-neon-purple" />}
+          >
+            <MsiCookiesEditor onSaved={() => refetch()} cookieFailStreak={s.cookieFailStreak || 0} />
+          </LockReveal>
 
           <MsiOtpIntervalSetting onSaved={() => refetch()} />
 
