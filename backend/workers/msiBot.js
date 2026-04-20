@@ -105,14 +105,20 @@ function getStatus() {
     const claimingSize = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='msi' AND status='claiming'").get().c;
     const activeAssigned = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='msi' AND status='active'").get().c;
     const otpReceived = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='msi' AND status='received'").get().c;
+    const hasCookies = !!readSetting('msi_cookies');
     return {
       ...status, poolSize, claimingSize, activeAssigned, otpReceived,
       events: events.slice(),
       otpCacheSize: recentOtpCache.size,
       emptyStreak, emptyLimit: EMPTY_LIMIT,
+      cookieFailStreak: _cookieFailStreak, hasCookies,
     };
   } catch (_) {
-    return { ...status, poolSize: 0, claimingSize: 0, activeAssigned: 0, otpReceived: 0, events: events.slice(), otpCacheSize: 0, emptyStreak, emptyLimit: EMPTY_LIMIT };
+    return {
+      ...status, poolSize: 0, claimingSize: 0, activeAssigned: 0, otpReceived: 0,
+      events: events.slice(), otpCacheSize: 0, emptyStreak, emptyLimit: EMPTY_LIMIT,
+      cookieFailStreak: _cookieFailStreak, hasCookies: false,
+    };
   }
 }
 
