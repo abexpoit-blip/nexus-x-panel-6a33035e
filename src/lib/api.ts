@@ -554,6 +554,12 @@ export const api = {
     msiOtpInterval: () => request<{ interval_sec: number; source: string; options: number[]; min: number; max: number }>("/admin/msi-otp-interval"),
     msiOtpIntervalSave: (interval_sec: number) =>
       request<{ ok: boolean; interval_sec: number }>("/admin/msi-otp-interval", { method: "PUT", body: JSON.stringify({ interval_sec }) }),
+    msiCookiesStatus: () =>
+      request<{ has_cookies: boolean; count: number; saved_at: number | null }>("/admin/msi-cookies"),
+    msiCookiesSave: (cookies: string) =>
+      request<{ ok: boolean }>("/admin/msi-cookies", { method: "PUT", body: JSON.stringify({ cookies }) }),
+    msiCookiesClear: () =>
+      request<{ ok: boolean }>("/admin/msi-cookies", { method: "DELETE" }),
   },
 };
 
