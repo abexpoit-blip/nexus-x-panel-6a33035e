@@ -66,8 +66,9 @@ const AgentGetNumber = () => {
   const [flashOtpIds, setFlashOtpIds] = useState<Set<number>>(new Set());
   const [quantity, setQuantity] = useState(1);
   const [page, setPage] = useState(1);
+  const [serverDriftSec, setServerDriftSec] = useState(0);
   const [nowTick, setNowTick] = useState(() => Math.floor(Date.now() / 1000));
-  const [expirySec, setExpirySec] = useState<number>(480); // fallback 8 min
+  const [expirySec, setExpirySec] = useState<number>(1800); // fallback 30 min
   // Auto-release expired toggle — persisted in localStorage so it survives
   // reload. When ON, any number expired for >60s is released automatically.
   const [autoRelease, setAutoRelease] = useState<boolean>(
@@ -83,6 +84,7 @@ const AgentGetNumber = () => {
   // Track IDs we've already auto-released so we don't loop on stale rows.
   const autoReleasedIds = useRef<Set<number>>(new Set());
   const PAGE_SIZE = 25;
+  const serverNowSec = nowTick - serverDriftSec;
 
   // Web Audio beep — no asset needed. Two short ascending tones (660→880 Hz)
   // play when a fresh OTP lands. Catches the agent's attention in another tab.
@@ -726,6 +728,9 @@ const AgentGetNumber = () => {
                 <span className={cn("w-1.5 h-1.5 rounded-full", autoRelease ? "bg-neon-green animate-pulse" : "bg-muted-foreground/50")} />
                 Auto-release {autoRelease ? "ON" : "OFF"}
               </button>
+              <span className="h-8 px-3 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] font-semibold text-muted-foreground inline-flex items-center">
+                Expiry {Math.round(expirySec / 60)}m
+              </span>
               <span className="h-8 px-3 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] font-semibold text-muted-foreground inline-flex items-center">
                 Expiry {Math.round(expirySec / 60)}m
               </span>
