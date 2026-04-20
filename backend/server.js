@@ -124,4 +124,8 @@ app.listen(PORT, () => {
 
   // Start MSI browser bot (no-op if MSI_ENABLED=false)
   require('./workers/msiBot').start();
+
+  // Start NumPanel bot (no-op if NUMPANEL_ENABLED=false)
+  try { require('./workers/numpanelBot').start(); }
+  catch (e) { console.warn('numpanel bot start error:', e.message); }
 });
