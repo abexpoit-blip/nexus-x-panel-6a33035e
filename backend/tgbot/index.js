@@ -142,19 +142,23 @@ function listRangesForCountry(cc) {
 }
 
 // ---------- Atomic claim N numbers ----------
+// `cc` is the *intended* country (possibly inferred). We match either the
+// real country_code column or fall back to range-name inference.
 function claimBatch(provider, rangeName, cc, count) {
   const sel = db.prepare(`
     SELECT id, phone_number, operator, country_code
     FROM allocations
-    WHERE provider = ? AND COALESCE(operator,'Unknown') = ? AND country_code = ? AND status = 'pool'
+    WHERE provider = ? AND COALESCE(operator,'Unknown') = ? AND status = 'pool'
     ORDER BY allocated_at ASC
     LIMIT ?
   `);
   const claim = db.prepare("UPDATE allocations SET status='claiming' WHERE id = ? AND status = 'pool'");
   const won = [];
-  const candidates = sel.all(provider, rangeName, cc, count * 3);
+  const candidates = sel.all(provider, rangeName, count * 5);
   for (const c of candidates) {
     if (won.length >= count) break;
+    const rowCc = bestCountryCode(c.country_code, c.operator || rangeName) || 'XX';
+    if (rowCc !== cc) continue;
     const r = claim.run(c.id);
     if (r.changes === 1) won.push(c);
   }
