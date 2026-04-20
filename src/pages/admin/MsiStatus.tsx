@@ -456,6 +456,38 @@ const AdminMsiStatus = () => {
 
           <CredentialsEditor onSaved={() => refetch()} />
 
+          <MsiOtpIntervalSetting onSaved={() => refetch()} />
+
+          <MsiManualPaste
+            existingRanges={poolData?.ranges?.map(r => r.name) ?? []}
+            onAdded={() => { refetch(); refetchPool(); }}
+          />
+
+          {(s.emptyLimit ?? 0) > 0 && (
+            <div className="glass-card border border-white/[0.06] rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-neon-amber" /> Auto-pause guard
+                </span>
+                <span className="text-xs font-mono text-muted-foreground">
+                  {s.emptyStreak ?? 0} / {s.emptyLimit} empty scrapes
+                </span>
+              </div>
+              <div className="h-2 bg-white/[0.04] rounded-full overflow-hidden">
+                <div
+                  className={cn("h-full transition-all duration-500",
+                    (s.emptyStreak ?? 0) >= (s.emptyLimit ?? 10) * 0.7 ? "bg-destructive" :
+                    (s.emptyStreak ?? 0) >= (s.emptyLimit ?? 10) * 0.4 ? "bg-neon-amber" : "bg-neon-green"
+                  )}
+                  style={{ width: `${Math.min(100, ((s.emptyStreak ?? 0) / (s.emptyLimit ?? 10)) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Bot will auto-stop if {s.emptyLimit} consecutive scrapes return zero numbers (set MSI_EMPTY_LIMIT env to enable; 0 = disabled).
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Stat icon={<CheckCircle2 className="w-3.5 h-3.5" />} label="Last login" value={fmtAgo(s.lastLoginAt)}
               hint={s.lastLoginAt ? new Date(s.lastLoginAt * 1000).toLocaleString() : "—"}
