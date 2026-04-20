@@ -114,6 +114,18 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
+// Mask last 4 digits with 'XXXX' (e.g. 95415646XXXX)
+function maskLast4(s) {
+  if (!s) return '';
+  const str = String(s);
+  if (str.length <= 4) return 'XXXX';
+  return str.slice(0, str.length - 4) + 'XXXX';
+}
+
+function newBatchId() {
+  return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
 // ---------- Country list (only TG-enabled ranges with pool > 0) ----------
 // Country code is inferred from range_name when allocations.country_code is missing
 function listCountries() {
