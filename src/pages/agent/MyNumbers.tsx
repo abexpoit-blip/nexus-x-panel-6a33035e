@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GlassCard } from "@/components/GlassCard";
@@ -38,12 +38,28 @@ const AgentMyNumbers = () => {
 
   const rows = useMemo(() => {
     const all = data?.numbers || [];
-    return all.filter((n) => {
-      if (status !== "all" && n.status !== status) return false;
-      if (q && !n.phone_number.toLowerCase().includes(q.toLowerCase())) return false;
-      return true;
-    });
+    return all
+      .filter((n) => {
+        if (status !== "all" && n.status !== status) return false;
+        if (q && !n.phone_number.toLowerCase().includes(q.toLowerCase())) return false;
+        return true;
+      })
+      // Newest OTP first: sort by otp_received_at desc, fallback to allocated_at
+      .slice()
+      .sort((a, b) => {
+        const ta = (a as any).otp_received_at || a.allocated_at || 0;
+        const tb = (b as any).otp_received_at || b.allocated_at || 0;
+        return tb - ta;
+      });
   }, [data, q, status]);
+
+  // Tick state to re-evaluate "fresh" highlight every 5s without refetching
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 5000);
+    return () => clearInterval(id);
+  }, []);
+  const FRESH_WINDOW_SEC = 60; // highlight OTPs received in last 60s
 
   return (
     <div className="space-y-6">
@@ -96,18 +112,44 @@ const AgentMyNumbers = () => {
 
       <DataTable
         columns={[
-          { key: "phone_number", header: "Number", render: (r) => <span className="font-mono text-foreground">{r.phone_number}</span> },
+          {
+            key: "phone_number",
+            header: "Number",
+            render: (r) => {
+              const recv = (r as any).otp_received_at as number | undefined;
+              const isFresh = !!recv && now - recv < FRESH_WINDOW_SEC;
+              return (
+                <span className="font-mono text-foreground inline-flex items-center gap-2">
+                  {r.phone_number}
+                  {isFresh && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-neon-green/20 text-neon-green border border-neon-green/40 animate-pulse">
+                      NEW
+                    </span>
+                  )}
+                </span>
+              );
+            },
+          },
           { key: "country_code", header: "Country", render: (r) => r.country_code || "—" },
           { key: "operator", header: "Operator", render: (r) => r.operator || "—" },
           {
             key: "otp",
             header: "OTP",
-            render: (r) =>
-              r.otp ? (
-                <span className="font-mono text-neon-green font-bold">{r.otp}</span>
-              ) : (
-                <span className="text-muted-foreground text-xs">waiting…</span>
-              ),
+            render: (r) => {
+              if (!r.otp) return <span className="text-muted-foreground text-xs">waiting…</span>;
+              const recv = (r as any).otp_received_at as number | undefined;
+              const isFresh = !!recv && now - recv < FRESH_WINDOW_SEC;
+              return (
+                <span
+                  className={cn(
+                    "font-mono text-neon-green font-bold",
+                    isFresh && "px-2 py-0.5 rounded ring-2 ring-neon-green/60 bg-neon-green/10 shadow-[0_0_12px_-2px_hsl(var(--neon-green)/0.6)]"
+                  )}
+                >
+                  {r.otp}
+                </span>
+              );
+            },
           },
           {
             key: "status",
@@ -129,7 +171,11 @@ const AgentMyNumbers = () => {
           {
             key: "allocated_at",
             header: "Time",
-            render: (r) => new Date(r.allocated_at * 1000).toLocaleString(),
+            render: (r) => {
+              const recv = (r as any).otp_received_at as number | undefined;
+              const ts = recv || r.allocated_at;
+              return new Date(ts * 1000).toLocaleString();
+            },
           },
           {
             key: "actions",
