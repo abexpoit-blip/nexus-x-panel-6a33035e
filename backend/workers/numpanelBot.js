@@ -428,12 +428,11 @@ async function login() {
   throw lastErr || new Error('NUMPANEL login failed after 3 attempts');
 }
 
-// ---- Scrape MySMSNumbers (number pool) ----
-// NUMPANEL table layout (verified live): Range | Prefix | Number | My Payout | Client | Payout | Limits
-// We must:
-//  • CLEAR any range/client filter ("Select Range" / "Select Client" dropdowns) so we get ALL numbers
-//  • Bump page size via DataTables API (jQuery selector $('table').DataTable().page.len(...))
-//  • Walk through every page until pagination ends
+// ---- Self Allocation: scrape range list + click REQUEST per range to claim numbers ----
+// Self Allocation table (verified live): Range | Test Number | Currency | 1/1 | 7/1 | 7/7 | 30/45 | Memo | ACTION (REQUEST btn)
+// Each click on REQUEST allocates ONE number to the agent and shows it (typically as a toast/popup or in a "Test Number" cell).
+// We open the page once, scrape the range list, then click REQUEST up to REQUEST_PER_RANGE times per visible range.
+// New numbers are then read from the "Test Number" column on subsequent reloads (or via the SMS Numbers page).
 async function scrapeNumbers() {
   await page.goto(`${BASE_URL}/NumberPanel/agent/SelfAllocation`, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null);
   if (/\/login/i.test(page.url())) { loggedIn = false; return []; }
@@ -529,93 +528,92 @@ async function scrapeNumbers() {
     return { bumped, info, tableRows };
   }).catch(() => ({ bumped: 0, info: '', tableRows: 0 }));
 
-  // Wait for the DataTable to redraw after page-size bump
-  await new Promise(r => setTimeout(r, 1500));
-  dlog(`[numpanel-bot] scrapeNumbers init: page-size selectors bumped=${sizeInfo.bumped} info="${sizeInfo.info}" rows=${sizeInfo.tableRows}`);
+  await new Promise(r => setTimeout(r, 1200));
+  dlog(`[numpanel-bot] SelfAllocation page loaded (info="${sizeInfo.info}" rows=${sizeInfo.tableRows})`);
 
-  const extractRows = () => page.evaluate(() => {
-    const out = [];
-    document.querySelectorAll('table tbody tr').forEach((row) => {
+  // Walk every visible range row, click its REQUEST button up to REQUEST_PER_RANGE times,
+  // and harvest the resulting phone number from the row's Test Number cell or any toast/dialog.
+  const collected = [];
+  // Get list of range names + selectors for their REQUEST buttons
+  const rangeRows = await page.evaluate(() => {
+    const rows = [];
+    document.querySelectorAll('table tbody tr').forEach((row, idx) => {
       const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
       if (!cells.length) return;
-      // Skip "no data" placeholder rows
-      if (cells.length === 1 && /no.*data|empty|loading/i.test(cells[0])) return;
-      // NUMPANEL: cells = [chk, Range, Prefix, Number, MyPayout, Client, Payout, Limits]
-      // Find the actual NUMPANELSDN: 10-15 digits, NOT the prefix (prefix is shorter ≤8 typically)
-      const phoneCells = cells.filter(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
-      // Pick the LONGEST digit string as the actual number (prefix is shorter)
-      const phone = phoneCells.sort((a, b) => b.length - a.length)[0];
-      if (!phone) return;
-      // Range = first cell containing letters that isn't a payout/limit/sms label
-      const range = cells.find(t =>
-        /[A-Za-z]/.test(t) &&
-        t.length < 60 &&
-        !/payout|weekly|monthly|sd\s*:|sw\s*:|\$|usd|eur|gbp/i.test(t)
-      );
-      out.push({ phone_number: phone.replace(/[\s-]/g, ''), operator: range || null });
+      // Range name = first cell with letters and not a "no data" placeholder
+      const range = cells.find(t => /[A-Za-z]/.test(t) && t.length < 80 &&
+        !/no.*data|empty|loading|usd|eur|gbp|\$/i.test(t));
+      const btn = row.querySelector('a, button, input[type="button"]');
+      const hasReq = btn && /request|claim|allocate/i.test((btn.innerText || btn.value || ''));
+      if (range && hasReq) rows.push({ range, idx });
     });
-    return out;
-  });
+    return rows;
+  }).catch(() => []);
+  dlog(`[numpanel-bot] SelfAllocation: ${rangeRows.length} ranges with REQUEST buttons`);
 
-  const seen = new Set();
-  const all = [];
-  const pushUnique = (rows) => {
-    for (const r of rows) {
-      if (seen.has(r.phone_number)) continue;
-      seen.add(r.phone_number);
-      all.push(r);
-    }
-  };
-  pushUnique(await extractRows());
-  dlog(`[numpanel-bot] page 1: ${all.length} unique numbers so far`);
+  if (REQUEST_PER_RANGE === 0) {
+    return []; // pool fill disabled
+  }
 
-  // Paginate up to 500 pages (with 100/page that's 50k numbers — way more than NUMPANEL accounts hold)
-  for (let i = 0; i < 500; i++) {
-    const clicked = await page.evaluate(() => {
-      const isDisabled = (el) => {
-        if (!el) return true;
-        const cls = (el.className || '') + ' ' + ((el.parentElement && el.parentElement.className) || '');
-        if (/disabled/i.test(cls)) return true;
-        if (el.getAttribute('aria-disabled') === 'true') return true;
-        return false;
-      };
-      // Try DataTables API first (most reliable)
+  for (const rr of rangeRows.slice(0, 50)) { // safety cap
+    for (let click = 0; click < REQUEST_PER_RANGE; click++) {
       try {
-        // eslint-disable-next-line no-undef
-        if (typeof window.jQuery === 'function' && window.jQuery.fn && window.jQuery.fn.dataTable) {
-          const $ = window.jQuery;
-          const $tbl = $('table.dataTable').first();
-          if ($tbl.length) {
-            const dt = $tbl.DataTable();
-            const info = dt.page.info();
-            if (info.page + 1 >= info.pages) return false;
-            dt.page('next').draw('page');
-            return true;
+        // Click REQUEST on this row, capture any popup/toast text or the updated row
+        const result = await page.evaluate((rowIdx) => {
+          const rows = document.querySelectorAll('table tbody tr');
+          const row = rows[rowIdx];
+          if (!row) return { ok: false, reason: 'row gone' };
+          const btn = row.querySelector('a, button, input[type="button"]');
+          if (!btn) return { ok: false, reason: 'no btn' };
+          btn.click();
+          return { ok: true };
+        }, rr.idx);
+        if (!result?.ok) break;
+        // Wait for AJAX
+        await new Promise(r => setTimeout(r, 800));
+        // Try to read the allocated number from: a toast, the row's Test Number cell, or any dialog
+        const phone = await page.evaluate((rowIdx) => {
+          // 1) sweetalert/toast/dialog text
+          const popups = Array.from(document.querySelectorAll(
+            '.swal2-popup, .swal-modal, .toast, .alert, .modal, [role="dialog"], .ui-dialog'
+          ));
+          for (const p of popups) {
+            const m = (p.innerText || '').match(/\b(\d{8,15})\b/);
+            if (m) return m[1];
           }
+          // 2) updated Test Number cell on the same row
+          const rows = document.querySelectorAll('table tbody tr');
+          const row = rows[rowIdx];
+          if (row) {
+            const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
+            for (const c of cells) {
+              const clean = c.replace(/[\s-+]/g, '');
+              if (/^\d{8,15}$/.test(clean)) return clean;
+            }
+          }
+          return null;
+        }, rr.idx);
+        // Dismiss any open popup
+        await page.evaluate(() => {
+          document.querySelectorAll('.swal2-confirm, .swal-button--confirm, .modal .close, [role="dialog"] button')
+            .forEach(b => { try { b.click(); } catch (_) {} });
+        }).catch(() => {});
+        await new Promise(r => setTimeout(r, 300));
+        if (phone) {
+          collected.push({ phone_number: phone, operator: rr.range });
+          dlog(`[numpanel-bot] REQUEST → ${rr.range} → ${phone}`);
+        } else {
+          // No phone found, likely ran out of stock for this range — stop hammering
+          break;
         }
-      } catch (_) {}
-      // Fallback: classic pagination button
-      let next = document.querySelector('a.paginate_button.next, li.next > a, a[rel="next"]');
-      if (!next) {
-        next = Array.from(document.querySelectorAll('a, button'))
-          .find(a => /^(next|›|»)$/i.test((a.innerText || '').trim()));
+      } catch (e) {
+        dwarn(`[numpanel-bot] REQUEST click failed on ${rr.range}: ${e.message}`);
+        break;
       }
-      if (!next || isDisabled(next)) return false;
-      next.click();
-      return true;
-    });
-    if (!clicked) break;
-    await new Promise(r => setTimeout(r, 700));
-    const before = all.length;
-    pushUnique(await extractRows());
-    if (all.length === before) {
-      // No new rows on this page — likely reached end (or click silently failed)
-      dlog(`[numpanel-bot] pagination stopped at page ${i + 2} (no new rows)`);
-      break;
     }
   }
-  dlog(`[numpanel-bot] scrapeNumbers DONE: ${all.length} total unique numbers across all pages`);
-  return all;
+  dlog(`[numpanel-bot] scrapeNumbers DONE: collected ${collected.length} fresh numbers across ${rangeRows.length} ranges`);
+  return collected;
 }
 
 // ---- Fetch CDR via REST API (no Puppeteer, no rate-limit, no captcha) ----
