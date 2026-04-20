@@ -689,26 +689,38 @@ async function showOtpHistory(ctx) {
 
 async function showLeaderboard(ctx) {
   const since = now() - 86400;
+  // Pull from CDR — captures BOTH real OTPs (note IS NULL or != fake:broadcast)
+  // AND fake-OTP broadcaster rows (note='fake:broadcast'). Counts merge into
+  // one number so agents see total range activity (real + boost).
   const topCountries = db.prepare(`
-    SELECT country_code, COUNT(*) cnt FROM tg_assignments
-    WHERE status = 'otp_received' AND otp_received_at >= ?
+    SELECT country_code, COUNT(*) cnt FROM cdr
+    WHERE status = 'billed' AND created_at >= ?
     GROUP BY country_code ORDER BY cnt DESC LIMIT 5
   `).all(since);
   const topRanges = db.prepare(`
-    SELECT country_code, range_name, service, COUNT(*) cnt FROM tg_assignments
-    WHERE status = 'otp_received' AND otp_received_at >= ?
-    GROUP BY country_code, range_name ORDER BY cnt DESC LIMIT 5
+    SELECT country_code, operator AS range_name, COUNT(*) cnt FROM cdr
+    WHERE status = 'billed' AND created_at >= ?
+    GROUP BY country_code, operator ORDER BY cnt DESC LIMIT 8
   `).all(since);
-  let txt = `<b>🏆 Leaderboard (last 24h)</b>\n\n<b>🌍 Top Countries</b>\n`;
+  // Total counter (real + boost combined)
+  const totalRow = db.prepare(`
+    SELECT COUNT(*) cnt FROM cdr WHERE status='billed' AND created_at >= ?
+  `).get(since);
+  const total = totalRow?.cnt || 0;
+
+  let txt = `<b>🔍 Active Range Checker (last 24h)</b>\n` +
+            `📊 Total OTPs delivered: <b>${total}</b>\n\n` +
+            `<b>🌍 Top Countries</b>\n`;
   if (topCountries.length === 0) txt += '<i>No data yet</i>\n';
   else topCountries.forEach((r, i) => {
     txt += `${i + 1}. ${flagOf(r.country_code)} ${countryName(r.country_code)} — <b>${r.cnt}</b> OTPs\n`;
   });
-  txt += `\n<b>📊 Top Ranges</b>\n`;
+  txt += `\n<b>📊 Top Active Ranges</b>\n`;
   if (topRanges.length === 0) txt += '<i>No data yet</i>\n';
   else topRanges.forEach((r, i) => {
-    txt += `${i + 1}. ${flagOf(r.country_code)} ${serviceIcon(r.service)} ${escapeHtml(r.range_name)} — <b>${r.cnt}</b>\n`;
+    txt += `${i + 1}. ${flagOf(r.country_code)} ${escapeHtml(r.range_name || '—')} — <b>${r.cnt}</b>\n`;
   });
+  txt += `\n<i>Tip: pick a hot range above for higher OTP delivery rates.</i>`;
   await ctx.replyWithHTML(txt);
 }
 
