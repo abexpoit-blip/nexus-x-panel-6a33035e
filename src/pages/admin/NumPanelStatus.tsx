@@ -569,10 +569,14 @@ const AdminNumPanelStatus = () => {
 
           <NumPanelOtpIntervalSetting onSaved={() => refetch()} />
 
-          <NumPanelManualPaste
-            existingRanges={poolData?.ranges?.map(r => r.name) ?? []}
-            onAdded={() => { refetch(); refetchPool(); }}
-          />
+          <LockReveal
+            title="NumPanel CDR API Token"
+            subtitle="Per-agent token from /NumberPanel/agent/API — used for instant OTP polling. Sensitive."
+            accent="neon-amber"
+            icon={<Zap className="w-4 h-4 text-neon-amber" />}
+          >
+            <NumPanelApiTokenEditor onSaved={() => refetch()} />
+          </LockReveal>
 
           {(s.emptyLimit ?? 0) > 0 && (
             <div className="glass-card border border-white/[0.06] rounded-xl p-4">
