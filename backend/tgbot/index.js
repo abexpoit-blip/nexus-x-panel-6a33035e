@@ -618,6 +618,34 @@ function expireOldAssignments() {
 }
 
 // ============================================================
+// BROADCAST WORKER — picks up pending broadcasts from admin UI
+// ============================================================
+async function processBroadcasts() {
+  const pending = db.prepare("SELECT * FROM tg_broadcasts WHERE status = 'pending' ORDER BY id ASC LIMIT 1").get();
+  if (!pending) return;
+  db.prepare("UPDATE tg_broadcasts SET status='sending' WHERE id = ?").run(pending.id);
+  const users = db.prepare("SELECT tg_user_id FROM tg_users WHERE status = 'active'").all();
+  let sent = 0, failed = 0;
+  for (const u of users) {
+    try {
+      await bot.telegram.sendMessage(u.tg_user_id, pending.message, { parse_mode: pending.parse_mode || 'HTML' });
+      sent++;
+      // 30 msg/sec rate limit
+      await new Promise(r => setTimeout(r, 35));
+    } catch (e) {
+      failed++;
+      // If user blocked the bot, mark them inactive
+      if (e.code === 403) {
+        db.prepare("UPDATE tg_users SET status='banned' WHERE tg_user_id = ?").run(u.tg_user_id);
+      }
+    }
+  }
+  db.prepare("UPDATE tg_broadcasts SET status='done', sent_count=?, failed_count=?, finished_at=? WHERE id = ?")
+    .run(sent, failed, now(), pending.id);
+  console.log(`[tgbot] broadcast #${pending.id} done: sent=${sent} failed=${failed}`);
+}
+
+// ============================================================
 // LAUNCH
 // ============================================================
 bot.catch((err, ctx) => {
@@ -633,7 +661,8 @@ bot.catch((err, ctx) => {
     bot.launch({ dropPendingUpdates: false });
     setInterval(pollOtps, 4000);
     setInterval(expireOldAssignments, 60_000);
-    console.log('✓ OTP poller (4s) + expiry janitor (60s) started');
+    setInterval(processBroadcasts, 5_000);
+    console.log('✓ OTP poller (4s) + expiry janitor (60s) + broadcast worker (5s) started');
   } catch (e) {
     console.error('FATAL: bot launch failed:', e.message);
     process.exit(1);
