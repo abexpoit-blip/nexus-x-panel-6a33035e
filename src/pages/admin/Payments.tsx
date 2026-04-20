@@ -251,4 +251,136 @@ const AdminPayments = () => {
   );
 };
 
+const PaymentConfigCard = () => {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["payment-config"], queryFn: () => api.withdrawals.config() });
+  const [draft, setDraft] = useState<PaymentConfig | null>(null);
+
+  useEffect(() => {
+    if (data && !draft) setDraft(data);
+  }, [data, draft]);
+
+  const save = useMutation({
+    mutationFn: (body: Partial<PaymentConfig>) => api.withdrawals.saveConfig(body),
+    onSuccess: (cfg) => {
+      toast.success("Payment config saved");
+      setDraft(cfg);
+      qc.invalidateQueries({ queryKey: ["payment-config"] });
+      qc.invalidateQueries({ queryKey: ["wd-policy"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (isLoading || !draft) {
+    return <p className="text-center text-muted-foreground text-sm py-8">Loading config…</p>;
+  }
+
+  const setMethod = (m: string, on: boolean) =>
+    setDraft({ ...draft, methods: { ...draft.methods, [m]: on } });
+
+  const allMethods = draft.all_methods?.length ? draft.all_methods : Object.keys(draft.methods);
+  const enabledCount = allMethods.filter((m) => draft.methods[m]).length;
+
+  return (
+    <div className="space-y-4">
+      <GlassCard>
+        <h3 className="font-display font-semibold mb-1 flex items-center gap-2">
+          <Wallet className="w-4 h-4 text-neon-amber" /> Withdrawal Policy
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          These limits apply to every agent withdrawal request.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+              Minimum Amount (৳)
+            </label>
+            <Input
+              type="number" min={1} step={1}
+              value={draft.min_amount}
+              onChange={(e) => setDraft({ ...draft, min_amount: Number(e.target.value) || 0 })}
+            />
+            <p className="text-[10px] text-muted-foreground">Smallest withdrawal an agent can request.</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+              Service Fee (%)
+            </label>
+            <Input
+              type="number" min={0} max={50} step="0.1"
+              value={draft.fee_percent}
+              onChange={(e) => setDraft({ ...draft, fee_percent: Number(e.target.value) || 0 })}
+            />
+            <p className="text-[10px] text-muted-foreground">Deducted from agent payout. 0-50%.</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+              SLA (hours)
+            </label>
+            <Input
+              type="number" min={1} max={168} step={1}
+              value={draft.sla_hours}
+              onChange={(e) => setDraft({ ...draft, sla_hours: Number(e.target.value) || 0 })}
+            />
+            <p className="text-[10px] text-muted-foreground">Promised processing time shown to agents.</p>
+          </div>
+        </div>
+      </GlassCard>
+
+      <GlassCard>
+        <h3 className="font-display font-semibold mb-1 flex items-center gap-2">
+          <SettingsIcon className="w-4 h-4 text-primary" /> Payment Methods
+        </h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Toggle which methods agents can choose when requesting withdrawal.
+          {" "}<span className="text-foreground font-semibold">{enabledCount}</span> enabled.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {allMethods.map((m) => (
+            <label
+              key={m}
+              className={cn(
+                "flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors",
+                draft.methods[m]
+                  ? "bg-neon-green/5 border-neon-green/30"
+                  : "bg-white/[0.02] border-white/[0.06] opacity-60"
+              )}
+            >
+              <span className="text-sm font-semibold">{METHOD_LABELS[m] || m}</span>
+              <Switch
+                checked={!!draft.methods[m]}
+                onCheckedChange={(on) => setMethod(m, on)}
+              />
+            </label>
+          ))}
+        </div>
+      </GlassCard>
+
+      <div className="flex items-center justify-between gap-3 px-1 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Changes apply immediately to agent withdrawal forms.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => data && setDraft(data)} disabled={save.isPending}>
+            Reset
+          </Button>
+          <Button
+            onClick={() => save.mutate({
+              min_amount: draft.min_amount,
+              fee_percent: draft.fee_percent,
+              sla_hours: draft.sla_hours,
+              methods: draft.methods,
+            })}
+            disabled={save.isPending}
+            className="bg-primary text-primary-foreground"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {save.isPending ? "Saving…" : "Save Config"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default AdminPayments;
