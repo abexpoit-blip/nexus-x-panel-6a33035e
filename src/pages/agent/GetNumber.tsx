@@ -36,10 +36,11 @@ interface Range {
   count: number;
 }
 
-// Agents see "Server A" / "Server B" — real provider names (acchub/ims) are hidden.
+// Agents see "Server A/B/C" — real provider names (acchub/ims/msi) are hidden.
 const SERVERS = [
   { id: "acchub", label: "Server A" },
   { id: "ims", label: "Server B" },
+  { id: "msi", label: "Server C" },
 ] as const;
 type ServerId = typeof SERVERS[number]["id"];
 
