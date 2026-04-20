@@ -618,86 +618,97 @@ async function scrapeNumbers() {
   return all;
 }
 
-// ---- Scrape SMS CDR Reports (OTPs) ----
-// NUMPANEL auto-loads with TODAY's date range. We just reload for fresh data.
-let _cdrReady = false;
+// ---- Fetch CDR via REST API (no Puppeteer, no rate-limit, no captcha) ----
+// API: GET {API_BASE}?token={TOKEN}&records=N
+// API_BASE typically = http://147.135.212.197/crapi/st/viewstats (per /agent/API page).
+// Response shape (verified 2026-04-20):
+//   { status: "ok", records: [ { date, range, number, cli, sms, currency, payout }, ... ] }
+//   { status: "error", msg: "No Records Found" }
+let _cdrReady = true; // not used for API path, kept for cookie-auth code below
 
-async function scrapeOtps() {
-  if (!page) return [];
-  const onCdr = /SMSCDRReports/i.test(page.url());
-  if (!onCdr || !_cdrReady) {
-    await page.goto(`${BASE_URL}/NumberPanel/agent/SMSCDRStats`, { waitUntil: 'networkidle2', timeout: 25000 });
-    if (/\/login/i.test(page.url())) { loggedIn = false; _cdrReady = false; return []; }
-    // Bump page size to 100
-    await page.evaluate(() => {
-      const sel = document.querySelector('select[name$="_length"], .dataTables_length select');
-      if (!sel) return;
-      const opts = Array.from(sel.options || []);
-      const pick = opts.find(o => +o.value === 100) || opts.find(o => +o.value === 50);
-      if (pick) { sel.value = pick.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
-    }).catch(() => {});
-    await new Promise(r => setTimeout(r, 1200));
-    _cdrReady = true;
-  } else {
-    // Subsequent polls — click Show Report (if present) or just re-fetch via reload
-    const clicked = await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn'))
-        .find(b => /show\s*report/i.test((b.innerText || b.value || '').trim()));
-      if (btn) { btn.click(); return true; }
-      return false;
-    }).catch(() => false);
-    if (clicked) {
-      await new Promise(r => setTimeout(r, 1500));
-    } else {
-      // Fallback: light reload
-      await page.reload({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
-    }
-  }
-
-  const rows = await page.evaluate(() => {
-    const out = [];
-    document.querySelectorAll('table tbody tr').forEach((row) => {
-      const cells = Array.from(row.querySelectorAll('td')).map(c => c.innerText.trim());
-      if (!cells.length || cells.length < 4) return;
-      // Skip "Total SMS" / footer rows
-      if (/^total\s*sms/i.test(cells[0] || '')) return;
-      // Find phone, sms text, date, cli
-      const phone = cells.find(t => /^\+?\d{8,15}$/.test(t.replace(/[\s-]/g, '')));
-      if (!phone) return;
-      const dateCell = cells.find(t => /\d{4}-\d{2}-\d{2}/.test(t));
-      // SMS text = the longest cell containing letters or a 4+ digit code
-      let smsText = '';
-      for (const c of cells) {
-        if (c === phone) continue;
-        if (c.length > smsText.length && /[a-zA-Z]/.test(c)) smsText = c;
-      }
-      if (!smsText) {
-        // fallback: longest non-phone cell
-        for (const c of cells) {
-          if (c === phone) continue;
-          if (c.length > smsText.length) smsText = c;
-        }
-      }
-      // CLI = short alpha label cell that is NOT the range/sms (often "AUB Cards" etc.)
-      const cliCell = cells.find(t => /[A-Za-z]/.test(t) && t.length < 30 && t !== phone && t !== smsText && !/^\d/.test(t));
-      // Extract OTP code: 3-8 digit number in SMS body
-      const otpMatch = smsText.match(/\b(\d{3,8})\b/);
-      out.push({
-        phone_number: phone.replace(/[\s-]/g, ''),
-        otp_code: otpMatch ? otpMatch[1] : null,
-        sms_text: smsText,
-        cli: cliCell || null,
-        date_str: dateCell || null,
+function _httpGetJson(url, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch (e) { return reject(e); }
+    const lib = parsed.protocol === 'https:' ? https : http;
+    const req = lib.get({
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      headers: { 'Accept': 'application/json', 'User-Agent': 'NexusX-NumPanelBot/1.0' },
+      timeout: timeoutMs,
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; if (body.length > 2_000_000) { req.destroy(); reject(new Error('response too large')); } });
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body, json: body ? JSON.parse(body) : null }); }
+        catch (_) { resolve({ status: res.statusCode, body, json: null }); }
       });
     });
-    return out;
-  }).catch(() => []);
+    req.on('timeout', () => { req.destroy(new Error('http timeout')); });
+    req.on('error', reject);
+  });
+}
 
-  // Convert dates
-  return rows.map(r => ({
-    ...r,
-    date_ts: r.date_str ? Math.floor(new Date(r.date_str.replace(' ', 'T') + 'Z').getTime() / 1000) || null : null,
-  })).filter(r => r.otp_code);
+async function scrapeOtps() {
+  if (!API_TOKEN) {
+    dwarn('[numpanel-bot] API_TOKEN not configured — cannot fetch OTPs');
+    return [];
+  }
+  const url = `${API_BASE}?token=${encodeURIComponent(API_TOKEN)}&records=200`;
+  const r = await _httpGetJson(url, 12000).catch((e) => {
+    dwarn('[numpanel-bot] CDR API fetch error:', e.message);
+    return null;
+  });
+  if (!r) return [];
+  if (r.status !== 200) {
+    dwarn(`[numpanel-bot] CDR API status ${r.status}: ${r.body.slice(0, 120)}`);
+    return [];
+  }
+  if (!r.json) {
+    dwarn('[numpanel-bot] CDR API non-JSON response:', r.body.slice(0, 120));
+    return [];
+  }
+  // Error response: {status:"error", msg:"No Records Found"}
+  if (r.json.status === 'error') {
+    if (!/no\s*records/i.test(r.json.msg || '')) dwarn('[numpanel-bot] CDR API error:', r.json.msg);
+    return [];
+  }
+  // Records may live under .records, .data, .result, or be the top-level array
+  const records = Array.isArray(r.json) ? r.json
+    : (r.json.records || r.json.data || r.json.result || []);
+  if (!Array.isArray(records)) return [];
+  const out = [];
+  for (const rec of records) {
+    if (!rec || typeof rec !== 'object') continue;
+    const phoneRaw = String(rec.number || rec.Number || rec.phone || rec.NUMBER || '').replace(/[\s-+]/g, '');
+    if (!/^\d{8,15}$/.test(phoneRaw)) continue;
+    const smsText = String(rec.sms || rec.SMS || rec.message || rec.body || '').trim();
+    const cli = (rec.cli || rec.CLI || rec.client || null);
+    const dateStr = String(rec.date || rec.DATE || rec.created_at || '').trim();
+    let dateTs = null;
+    if (dateStr) {
+      const t = Date.parse(dateStr.replace(' ', 'T'));
+      if (!isNaN(t)) dateTs = Math.floor(t / 1000);
+      // Fallback: also try as UTC
+      if (!dateTs) {
+        const t2 = Date.parse(dateStr.replace(' ', 'T') + 'Z');
+        if (!isNaN(t2)) dateTs = Math.floor(t2 / 1000);
+      }
+    }
+    const otpMatch = smsText.match(/\b(\d{3,8})\b/);
+    if (!otpMatch) continue;
+    out.push({
+      phone_number: phoneRaw,
+      otp_code: otpMatch[1],
+      sms_text: smsText,
+      cli: cli || null,
+      date_str: dateStr || null,
+      date_ts: dateTs,
+    });
+  }
+  return out;
 }
 
 // ---- OTP cache (mirror of IMS) ----
