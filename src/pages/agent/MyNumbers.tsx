@@ -112,18 +112,44 @@ const AgentMyNumbers = () => {
 
       <DataTable
         columns={[
-          { key: "phone_number", header: "Number", render: (r) => <span className="font-mono text-foreground">{r.phone_number}</span> },
+          {
+            key: "phone_number",
+            header: "Number",
+            render: (r) => {
+              const recv = (r as any).otp_received_at as number | undefined;
+              const isFresh = !!recv && now - recv < FRESH_WINDOW_SEC;
+              return (
+                <span className="font-mono text-foreground inline-flex items-center gap-2">
+                  {r.phone_number}
+                  {isFresh && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-neon-green/20 text-neon-green border border-neon-green/40 animate-pulse">
+                      NEW
+                    </span>
+                  )}
+                </span>
+              );
+            },
+          },
           { key: "country_code", header: "Country", render: (r) => r.country_code || "—" },
           { key: "operator", header: "Operator", render: (r) => r.operator || "—" },
           {
             key: "otp",
             header: "OTP",
-            render: (r) =>
-              r.otp ? (
-                <span className="font-mono text-neon-green font-bold">{r.otp}</span>
-              ) : (
-                <span className="text-muted-foreground text-xs">waiting…</span>
-              ),
+            render: (r) => {
+              if (!r.otp) return <span className="text-muted-foreground text-xs">waiting…</span>;
+              const recv = (r as any).otp_received_at as number | undefined;
+              const isFresh = !!recv && now - recv < FRESH_WINDOW_SEC;
+              return (
+                <span
+                  className={cn(
+                    "font-mono text-neon-green font-bold",
+                    isFresh && "px-2 py-0.5 rounded ring-2 ring-neon-green/60 bg-neon-green/10 shadow-[0_0_12px_-2px_hsl(var(--neon-green)/0.6)]"
+                  )}
+                >
+                  {r.otp}
+                </span>
+              );
+            },
           },
           {
             key: "status",
@@ -145,7 +171,11 @@ const AgentMyNumbers = () => {
           {
             key: "allocated_at",
             header: "Time",
-            render: (r) => new Date(r.allocated_at * 1000).toLocaleString(),
+            render: (r) => {
+              const recv = (r as any).otp_received_at as number | undefined;
+              const ts = recv || r.allocated_at;
+              return new Date(ts * 1000).toLocaleString();
+            },
           },
           {
             key: "actions",
