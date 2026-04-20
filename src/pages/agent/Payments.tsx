@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { DataTable } from "@/components/DataTable";
@@ -10,7 +10,15 @@ import { Wallet, ArrowDownToLine, Send } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_POLICY = { min_amount: 500, fee_percent: 2, sla_hours: 24 };
+const DEFAULT_POLICY = {
+  min_amount: 500, fee_percent: 2, sla_hours: 24,
+  methods_enabled: ["bkash", "nagad", "rocket", "bank", "crypto"] as string[],
+  methods: { bkash: true, nagad: true, rocket: true, bank: true, crypto: true } as Record<string, boolean>,
+};
+
+const METHOD_LABELS: Record<string, string> = {
+  bkash: "bKash", nagad: "Nagad", rocket: "Rocket", bank: "Bank Transfer", crypto: "Crypto (USDT)",
+};
 
 const statusBadge = (s: string) => cn(
   "px-2 py-0.5 rounded text-xs font-semibold uppercase",
@@ -32,8 +40,24 @@ const AgentPayments = () => {
 
   const { data: payData, isLoading } = useQuery({ queryKey: ["my-payments"], queryFn: () => api.payments.mine() });
   const { data: wdData } = useQuery({ queryKey: ["my-withdrawals"], queryFn: () => api.withdrawals.mine(), refetchInterval: 30000 });
-  const { data: policyData } = useQuery({ queryKey: ["wd-policy"], queryFn: () => api.withdrawals.policy() });
-  const policy = policyData ?? DEFAULT_POLICY;
+  const { data: policyData } = useQuery({
+    queryKey: ["wd-policy"],
+    queryFn: () => api.withdrawals.policy(),
+    refetchInterval: 60000, // pick up admin config changes within a minute
+  });
+  const policy = { ...DEFAULT_POLICY, ...(policyData ?? {}) };
+  const enabledMethods: string[] = policy.methods_enabled?.length
+    ? policy.methods_enabled
+    : DEFAULT_POLICY.methods_enabled;
+
+  // Auto-switch if currently selected method becomes disabled
+  useEffect(() => {
+    if (enabledMethods.length && !enabledMethods.includes(method)) {
+      setMethod(enabledMethods[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledMethods.join(",")]);
+
   const hasPending = (wdData?.withdrawals || []).some((w) => w.status === "pending");
 
   const submit = useMutation({
@@ -87,12 +111,13 @@ const AgentPayments = () => {
               <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Method</label>
               <select value={method} onChange={(e) => setMethod(e.target.value)}
                 className="w-full h-10 px-3 rounded-md bg-white/[0.04] border border-white/[0.08]">
-                <option value="bkash">bKash</option>
-                <option value="nagad">Nagad</option>
-                <option value="rocket">Rocket</option>
-                <option value="bank">Bank Transfer</option>
-                <option value="crypto">Crypto (USDT)</option>
+                {enabledMethods.map((m) => (
+                  <option key={m} value={m}>{METHOD_LABELS[m] || m}</option>
+                ))}
               </select>
+              {enabledMethods.length === 0 && (
+                <p className="text-[10px] text-destructive">No payment methods are currently accepted. Contact admin.</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Account Name</label>
