@@ -240,11 +240,11 @@ async function loginOnce() {
 
   await Promise.all([
     page.evaluate(() => {
-      const btn = document.querySelector('button[type="submit"], input[type="submit"]') ||
+      const btn = document.querySelector('button.login100-form-btn, button[type="submit"], input[type="submit"]') ||
                   Array.from(document.querySelectorAll('button')).find(b => /login|sign in/i.test(b.innerText || ''));
       if (btn) btn.click();
     }),
-    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => null),
   ]);
 
   const url = page.url();
