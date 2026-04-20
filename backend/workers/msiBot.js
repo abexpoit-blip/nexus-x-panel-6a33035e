@@ -65,6 +65,22 @@ function resolveOtpInterval() {
   const env = +(process.env.MSI_SCRAPE_INTERVAL || 5);
   return Math.max(3, db > 0 ? db : env);
 }
+// One-time cleanup: if DB has a polluted msi_base_url (e.g. saved with /ints/login),
+// rewrite it to the normalized scheme+host so we don't keep building broken URLs.
+try {
+  const cur = readSetting('msi_base_url');
+  if (cur) {
+    const fixed = normalizeBase(cur);
+    if (fixed && fixed !== cur) {
+      db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES ('msi_base_url', ?, strftime('%s','now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = strftime('%s','now')
+      `).run(fixed);
+      console.log(`[msi-bot] auto-cleaned msi_base_url: "${cur}" → "${fixed}"`);
+    }
+  }
+} catch (_) {}
+
 let { ENABLED, BASE_URL, USERNAME, PASSWORD } = resolveCreds();
 const HEADLESS = String(process.env.MSI_HEADLESS || 'true').toLowerCase() !== 'false';
 const CHROME_PATH = process.env.MSI_CHROME_PATH || undefined;
