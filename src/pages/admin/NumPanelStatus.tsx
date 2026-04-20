@@ -431,6 +431,82 @@ const NumPanelOtpIntervalSetting = ({ onSaved }: { onSaved: () => void }) => {
 };
 
 
+
+// ---- API Token editor (NumPanel-specific — for CDR API polling) ----
+const NumPanelApiTokenEditor = ({ onSaved }: { onSaved: () => void }) => {
+  const [token, setToken] = useState("");
+  const [apiBase, setApiBase] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { data, refetch } = useQuery({
+    queryKey: ["numpanel-api-token"],
+    queryFn: () => api.admin.numpanelApiToken(),
+  });
+
+  useEffect(() => {
+    if (data?.api_base && !apiBase) setApiBase(data.api_base);
+  }, [data, apiBase]);
+
+  const save = async () => {
+    if (!token.trim() && !apiBase.trim()) { toast.error("Nothing to save"); return; }
+    setSaving(true);
+    try {
+      await api.admin.numpanelApiTokenSave({
+        api_token: token.trim() || undefined,
+        api_base: apiBase.trim() || undefined,
+      });
+      toast.success("API token saved — bot restarting");
+      setToken("");
+      refetch();
+      onSaved();
+    } catch (e) { toast.error("Save failed: " + (e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="glass-card border border-white/[0.06] rounded-xl p-5 space-y-4">
+      <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        <Zap className="w-3.5 h-3.5 text-neon-amber" /> CDR API Token
+        {data?.has_token && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-neon-green/15 text-neon-green font-bold">
+            ✓ saved: {data.token_masked}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Get this from <code className="px-1 py-0.5 rounded bg-black/40 font-mono text-[11px]">http://51.89.99.105/NumberPanel/agent/API</code>.
+        Used to fetch OTPs from <code className="px-1 py-0.5 rounded bg-black/40 font-mono text-[11px]">/crapi/st/viewstats</code> with no rate limit.
+      </p>
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">API Base URL</div>
+        <input value={apiBase} onChange={e => setApiBase(e.target.value)}
+          placeholder="http://147.135.212.197/crapi/st/viewstats"
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-3 py-2 text-sm font-mono" />
+      </div>
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">
+          API Token {data?.has_token && <span className="text-neon-green">(currently saved — leave blank to keep)</span>}
+        </div>
+        <div className="relative">
+          <input type={show ? "text" : "password"} value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder={data?.has_token ? "Leave blank to keep current" : "Paste API token from NumPanel"}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-3 py-2 text-sm font-mono pr-10" />
+          <button type="button" onClick={() => setShow(s => !s)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+      <button onClick={save} disabled={saving}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-neon-amber/10 border border-neon-amber/30 text-neon-amber hover:bg-neon-amber/20 transition disabled:opacity-50">
+        <Save className={cn("w-3.5 h-3.5", saving && "animate-pulse")} />
+        {saving ? "Saving…" : "Save & Restart Bot"}
+      </button>
+    </div>
+  );
+};
+
 const AdminNumPanelStatus = () => {
   const [restarting, setRestarting] = useState(false);
   const [scraping, setScraping] = useState(false);
