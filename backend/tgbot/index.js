@@ -606,7 +606,10 @@ bot.action(/^releaseBatch:(.+)$/, async (ctx) => {
     for (const a of rows) {
       if (a.status === 'active') {
         db.prepare("UPDATE tg_assignments SET status='released' WHERE id = ?").run(a.id);
-        db.prepare("UPDATE allocations SET status='pool' WHERE id = ? AND status='active'").run(a.allocation_id);
+        // Reset allocated_at so the next claimer (TG or website) gets a clean
+        // expiry window — prevents "instant expired" on subsequent grabs.
+        db.prepare("UPDATE allocations SET status='pool', allocated_at=strftime('%s','now') WHERE id = ? AND status='active'")
+          .run(a.allocation_id);
       }
     }
   })();
