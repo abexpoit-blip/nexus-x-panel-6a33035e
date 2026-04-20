@@ -200,23 +200,27 @@ const AgentGetNumber = () => {
     if (provider === "ims") {
       api.imsRanges().then(({ ranges }) => setRanges(ranges)).catch(() => setRanges([]));
       setCountries([]);
+    } else if (provider === "msi") {
+      api.msiRanges().then(({ ranges }) => setRanges(ranges)).catch(() => setRanges([]));
+      setCountries([]);
     } else {
       setRanges([]);
       api.countries(provider).then(({ countries }) => setCountries(countries)).catch(() => setCountries([]));
     }
   }, [provider]);
 
-  // Refresh range counts every 10s while Server B is selected
+  // Refresh range counts every 10s while a range-based server is selected
   useEffect(() => {
-    if (provider !== "ims") return;
+    if (provider !== "ims" && provider !== "msi") return;
+    const fetcher = provider === "ims" ? api.imsRanges : api.msiRanges;
     const i = setInterval(() => {
-      api.imsRanges().then(({ ranges }) => setRanges(ranges)).catch(() => {});
+      fetcher().then(({ ranges }) => setRanges(ranges)).catch(() => {});
     }, 10000);
     return () => clearInterval(i);
   }, [provider]);
 
   useEffect(() => {
-    if (provider === "ims" || !countryId) { setOperators([]); setOperatorId(""); return; }
+    if (provider === "ims" || provider === "msi" || !countryId) { setOperators([]); setOperatorId(""); return; }
     setOperatorId("");
     api.operators(provider, Number(countryId)).then(({ operators }) => setOperators(operators)).catch(() => {});
   }, [countryId, provider]);
@@ -253,7 +257,7 @@ const AgentGetNumber = () => {
       toast({ title: "Maintenance mode", description: maintenanceMessage, variant: "destructive" });
       return;
     }
-    if (provider === "ims") {
+    if (provider === "ims" || provider === "msi") {
       if (!rangeName) { toast({ title: "Select a range", variant: "destructive" }); return; }
     } else if (!countryId || !operatorId) {
       toast({ title: "Select country & operator", variant: "destructive" });
@@ -263,7 +267,7 @@ const AgentGetNumber = () => {
     try {
       const { allocated, errors } = await api.getNumber({
         provider,
-        ...(provider === "ims"
+        ...(provider === "ims" || provider === "msi"
           ? { range: rangeName }
           : { country_id: Number(countryId), operator_id: Number(operatorId) }),
         count: quantity,
@@ -272,8 +276,6 @@ const AgentGetNumber = () => {
       setNumbers((prev) => [...allocated.map((a: AllocatedNumber) => ({ ...a, status: "active" as const, allocated_at: a.allocated_at ?? nowSec })), ...prev]);
       setPage(1);
       if (allocated.length) {
-        // Auto-copy freshly allocated numbers to clipboard (one per line).
-        // Saves the agent from clicking copy on every row when bulk-getting 5/100.
         try {
           const clip = allocated.map((a: AllocatedNumber) => a.phone_number).join("\n");
           await navigator.clipboard.writeText(clip);
@@ -287,6 +289,7 @@ const AgentGetNumber = () => {
       }
       if (errors.length) toast({ title: "Some failed", description: errors.join(", "), variant: "destructive" });
       if (provider === "ims") api.imsRanges().then(({ ranges }) => setRanges(ranges)).catch(() => {});
+      else if (provider === "msi") api.msiRanges().then(({ ranges }) => setRanges(ranges)).catch(() => {});
     } catch (e: unknown) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
