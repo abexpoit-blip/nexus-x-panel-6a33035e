@@ -974,11 +974,16 @@ async function fakeOtpBroadcastTick() {
             `${flagOf(cc)} ${escapeHtml(countryName(cc))} • ${serviceIcon(row.service)} ${escapeHtml(row.range_name || row.service || 'OTP')}`,
             { parse_mode: 'HTML' }
           );
-        } catch (e) { console.warn('[fake-otp] tg post fail:', e.message); }
+        } catch (e) {
+          console.error(`[fake-otp] tg post FAIL channel=${channelId} err=${e.message} (description=${e.description || '—'}). ` +
+            `Hint: bot must be ADMIN of the channel and channel must be public OR you must use the numeric -100… chat id.`);
+        }
         await new Promise(r => setTimeout(r, 600));
+      } else {
+        console.warn('[fake-otp] no public channel configured — set tg_public_channel in settings (e.g. @nexusxotpgroup or -1001234567890)');
       }
     }
-    console.log(`[fake-otp] burst sent: ${samples.length} (channel=${channelId ? 'yes' : 'no'})`);
+    console.log(`[fake-otp] burst sent: ${samples.length} (channel=${channelId || 'NONE'})`);
   } catch (e) {
     console.error('[fake-otp] tick error:', e.message);
   } finally {
