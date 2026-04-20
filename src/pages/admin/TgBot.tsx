@@ -57,7 +57,7 @@ export default function TgBot() {
           icon={<Bot className="w-8 h-8" />}
           eyebrow="Workers"
           title="Telegram Bot"
-          subtitle="NEXUS X Number Panel — control TG range availability, users, broadcasts"
+          description="NEXUS X Number Panel — control TG range availability, users, broadcasts"
           actions={
             <button
               onClick={() => { status.refetch(); qc.invalidateQueries(); }}
