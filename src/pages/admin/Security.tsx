@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GlassCard } from "@/components/GlassCard";
 import { DataTable } from "@/components/DataTable";
@@ -49,13 +49,12 @@ const AdminSecurity = () => {
   const [rangesQuery] = [useQuery({
     queryKey: ["fake-otp-ranges"], queryFn: () => api.tgbot.rangeSettings(),
   })];
-  // Sync form when query loads
-  useState(() => {
-    fakeQuery.data && setFakeForm({
+  useEffect(() => {
+    if (fakeQuery.data) setFakeForm({
       enabled: fakeQuery.data.enabled, min_sec: fakeQuery.data.min_sec,
       max_sec: fakeQuery.data.max_sec, burst: fakeQuery.data.burst,
     });
-  });
+  }, [fakeQuery.data]);
   const saveFake = useMutation({
     mutationFn: (body: Partial<typeof fakeForm>) => api.fakeOtp.save(body),
     onSuccess: () => { toast.success("Fake-OTP settings saved"); qc.invalidateQueries({ queryKey: ["fake-otp"] }); },
