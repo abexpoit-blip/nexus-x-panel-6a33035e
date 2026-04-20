@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GlassCard } from "@/components/GlassCard";
 import { useAuth } from "@/contexts/AuthContext";
-import { Trophy, Medal, Hash, Wallet, Crown, Award, Star } from "lucide-react";
+import { Trophy, Medal, Wallet, Crown, Award, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Tiered badge based on OTPs delivered in the selected period
@@ -17,11 +17,11 @@ const tierFor = (otp: number) => {
 };
 
 type Period = "today" | "7d" | "all";
-const PERIOD_LABEL: Record<Period, string> = { today: "Today", "7d": "7 Days", all: "All Time" };
+const PERIOD_LABEL: Record<Period, string> = { today: "Today", "7d": "Last 7 Days", all: "All Time" };
 
 const AgentLeaderboard = () => {
   const { user } = useAuth();
-  const [period, setPeriod] = useState<Period>("today");
+  const [period, setPeriod] = useState<Period>("7d");
 
   const { data, isLoading } = useQuery({
     queryKey: ["leaderboard", period],
@@ -66,9 +66,6 @@ const AgentLeaderboard = () => {
             const medal = i === 0 ? "text-neon-amber" : i === 1 ? "text-muted-foreground" : i === 2 ? "text-orange-400" : "text-muted-foreground/40";
             const tier = tierFor(r.otp_count);
             const TierIcon = tier.icon;
-            const successRate = r.numbers_used && r.numbers_used > 0
-              ? Math.round((r.otp_count / r.numbers_used) * 100)
-              : 0;
             const isPodium = i < 3;
             return (
               <div
@@ -100,17 +97,9 @@ const AgentLeaderboard = () => {
                       </span>
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
-                      <span className="inline-flex items-center gap-1">
-                        <Hash className="w-3 h-3" /> {(r.numbers_used ?? 0).toLocaleString()} numbers
-                      </span>
                       {(r.earnings_bdt ?? 0) > 0 && (
                         <span className="inline-flex items-center gap-1 text-neon-green">
                           <Wallet className="w-3 h-3" /> ৳{(+(r.earnings_bdt ?? 0)).toFixed(0)}
-                        </span>
-                      )}
-                      {successRate > 0 && (
-                        <span className="hidden sm:inline">
-                          {successRate}% success
                         </span>
                       )}
                     </div>
