@@ -5,6 +5,7 @@ import { GradientMesh, PageHeader } from "@/components/premium";
 import {
   Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText,
   RefreshCw, Power, Play, Square, Save, Eye, EyeOff, Zap, Sparkles, Layers,
+  Clock, ClipboardPaste, Plus, Info, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -33,6 +34,8 @@ type MsiStatus = {
   otpReceived: number;
   otpCacheSize: number;
   events?: { ts: number; level: string; message: string; meta: unknown }[];
+  emptyStreak?: number;
+  emptyLimit?: number;
 };
 
 const fmtAgo = (ts: number | null) => {
