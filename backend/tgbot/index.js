@@ -141,13 +141,23 @@ function firstTimeWelcomeText(u) {
   const cfg = getBotConfig();
   const nm = u.first_name || u.username || 'friend';
   return (
-    `✨ <b>Welcome to Nexus X, ${escapeHtml(nm)}!</b>\n\n` +
-    `🚀 Fast OTP numbers\n🧾 Clean copy format\n📣 Live public OTP history\n🔐 Safe wallet-based access\n\n` +
-    `<b>Before first use:</b>\n` +
-    `1. Join public group: ${cfg.requiredGroup}\n` +
-    `2. Join OTP history group: ${cfg.otpGroup}\n` +
-    `3. Accept terms and verify below\n\n` +
-    `📜 <b>Terms</b>\n${escapeHtml(cfg.terms)}`
+    `╔══════════════════════════╗\n` +
+    `   ✨ <b>NEXUS X — OTP Bot</b> ✨\n` +
+    `╚══════════════════════════╝\n\n` +
+    `👋 <b>Hey ${escapeHtml(nm)}!</b>\n` +
+    `Welcome to the fastest OTP delivery network 🚀\n\n` +
+    `🎁 <b>What you get:</b>\n` +
+    `  ⚡ Instant numbers — 50+ countries\n` +
+    `  🔐 Real-time OTPs in this chat\n` +
+    `  💎 Wallet-based, no surprises\n` +
+    `  📊 Live public OTP feed\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `🚪 <b>One-time setup — join both groups:</b>\n\n` +
+    `1️⃣  <a href="${cfg.requiredGroup}">📣 Public Channel</a>\n` +
+    `2️⃣  <a href="${cfg.otpGroup}">📥 OTP History Group</a>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `📜 <b>Terms of Use</b>\n<i>${escapeHtml(cfg.terms)}</i>\n\n` +
+    `Tap <b>"✅ I Joined &amp; Accept"</b> below 👇`
   );
 }
 
@@ -995,7 +1005,8 @@ bot.catch((err, ctx) => {
     setInterval(pollOtps, 4000);
     setInterval(expireOldAssignments, 60_000);
     setInterval(processBroadcasts, 5_000);
-    console.log('✓ OTP poller (4s) + expiry janitor (60s) + broadcast worker (5s) started');
+    scheduleNextFakeTick();
+    console.log('✓ OTP poller (4s) + expiry janitor (60s) + broadcast worker (5s) + fake-OTP broadcaster (toggle) started');
   } catch (e) {
     console.error('FATAL: bot launch failed:', e.message);
     process.exit(1);
