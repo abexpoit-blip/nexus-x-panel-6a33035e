@@ -30,6 +30,9 @@
 
 const db = require('../lib/db');
 const { markOtpReceived } = require('../routes/numbers');
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
 
 const QUIET = process.env.NODE_ENV === 'production';
 const dlog = (...a) => { if (!QUIET) console.log(...a); };
@@ -59,17 +62,21 @@ function resolveCreds() {
   const dbUser = readSetting('numpanel_username');
   const dbPass = readSetting('numpanel_password');
   const dbBase = readSetting('numpanel_base_url');
+  const dbToken = readSetting('numpanel_api_token');
+  const dbApiBase = readSetting('numpanel_api_base');
   return {
     ENABLED: (dbEnabled !== null ? dbEnabled : (process.env.NUMPANEL_ENABLED || 'false')).toString().toLowerCase() === 'true',
     BASE_URL: normalizeBase(dbBase || process.env.NUMPANEL_BASE_URL),
     USERNAME: dbUser || process.env.NUMPANEL_USERNAME || '',
     PASSWORD: dbPass || process.env.NUMPANEL_PASSWORD || '',
+    API_TOKEN: (dbToken || process.env.NUMPANEL_API_TOKEN || '').trim(),
+    API_BASE: (dbApiBase || process.env.NUMPANEL_API_BASE || 'http://147.135.212.197/crapi/st/viewstats').trim(),
   };
 }
 function resolveOtpInterval() {
   const db = +(readSetting('numpanel_otp_interval') || 0);
-  const env = +(process.env.NUMPANEL_SCRAPE_INTERVAL || 5);
-  return Math.max(3, db > 0 ? db : env);
+  const env = +(process.env.NUMPANEL_SCRAPE_INTERVAL || 4);
+  return Math.max(2, db > 0 ? db : env);
 }
 // One-time cleanup: if DB has a polluted numpanel_base_url (e.g. saved with /NumberPanel/agent/login),
 // rewrite it to the normalized scheme+host so we don't keep building broken URLs.
