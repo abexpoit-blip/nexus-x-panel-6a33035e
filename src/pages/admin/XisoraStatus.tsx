@@ -287,6 +287,51 @@ const AdminXisoraStatus = () => {
             </div>
           </div>
 
+          {/* Auto-restart settings */}
+          <div className="glass-card border border-white/[0.06] rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-neon-amber" />
+                Stale-session auto-restart
+              </div>
+              {arData?.lastTriggerTs && (
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  last trigger <span className="font-mono text-neon-amber">{fmtAgo(arData.lastTriggerTs)}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="inline-flex items-center gap-2 text-xs cursor-pointer select-none">
+                <input type="checkbox" checked={arEnabled}
+                  onChange={(e) => setArEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded accent-neon-cyan" />
+                <span className="font-semibold">Enable auto-restart</span>
+              </label>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Restart after</span>
+                <input type="number" min={2} max={60} value={arIntervals}
+                  onChange={(e) => setArIntervals(Math.max(2, Math.min(60, +e.target.value || 3)))}
+                  className="w-16 px-2 py-1 bg-white/[0.04] border border-white/[0.08] rounded font-mono text-center text-xs focus:outline-none focus:border-neon-cyan/50" />
+                <span className="text-muted-foreground">stale intervals
+                  {s && <span className="font-mono text-neon-cyan ml-1">(≈{arIntervals * s.otpIntervalSec}s)</span>}
+                </span>
+              </div>
+              <button onClick={handleSaveAutoRestart} disabled={arSaving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan hover:bg-neon-cyan/20 transition disabled:opacity-50">
+                <Save className={cn("w-3.5 h-3.5", arSaving && "animate-pulse")} />
+                {arSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {arData?.lastReason && (
+              <div className="mt-2 text-[11px] font-mono text-muted-foreground break-all">
+                <span className="text-neon-amber">↳</span> {arData.lastReason}
+              </div>
+            )}
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              When enabled, the worker watchdog will automatically call <span className="font-mono">restart()</span> if no successful OTP poll occurs for the configured number of intervals. 60s cooldown between auto-restarts.
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat icon={<Layers className="w-3.5 h-3.5" />} label="Pool size" value={s.poolSize ?? 0}
               hint={`${s.claimingSize ?? 0} claiming`} accent="text-neon-cyan" />
