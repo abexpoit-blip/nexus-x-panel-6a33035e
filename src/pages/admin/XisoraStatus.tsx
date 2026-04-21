@@ -419,13 +419,16 @@ const AdminXisoraStatus = () => {
             </div>
           )}
 
-          {/* Run history */}
-          {runsData && runsData.runs.length > 0 && (
+          {/* Run history (paginated) */}
+          {runsData && runsTotal > 0 && (
             <div className="glass-card border border-white/[0.06] rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div className="text-sm font-semibold flex items-center gap-2">
                   <HistoryIcon className="w-4 h-4 text-neon-purple" />
-                  Run history ({runsData.runs.length})
+                  Run history
+                  <span className="text-xs text-muted-foreground font-normal ml-1">
+                    ({runsTotal} total · page {runsPage}/{runsTotalPages})
+                  </span>
                 </div>
                 <button onClick={() => refetchRuns()}
                   className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition">
@@ -451,6 +454,7 @@ const AdminXisoraStatus = () => {
                           <span className={cn("inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
                             run.kind === "scrape-now" && "bg-neon-cyan/15 text-neon-cyan",
                             run.kind === "sync-live" && "bg-neon-amber/15 text-neon-amber",
+                            run.kind === "auto-restart" && "bg-destructive/15 text-destructive",
                             run.kind.startsWith("auto") && "bg-white/[0.05] text-muted-foreground",
                           )}>{run.kind}</span>
                         </td>
@@ -480,6 +484,32 @@ const AdminXisoraStatus = () => {
                   </tbody>
                 </table>
               </div>
+              {runsTotalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-white/[0.05]">
+                  <p className="text-[10px] text-muted-foreground">
+                    Showing <span className="font-mono text-foreground">{(runsPage - 1) * RUNS_PAGE_SIZE + 1}–{Math.min(runsPage * RUNS_PAGE_SIZE, runsTotal)}</span> of <span className="font-mono text-foreground">{runsTotal}</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setRunsPage(1)} disabled={runsPage === 1}
+                      className="h-7 px-1.5 inline-flex items-center rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronsLeft className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => setRunsPage(Math.max(1, runsPage - 1))} disabled={runsPage === 1}
+                      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronLeft className="w-3 h-3" /> Prev
+                    </button>
+                    <span className="px-2 text-[11px] font-mono text-foreground">{runsPage} / {runsTotalPages}</span>
+                    <button onClick={() => setRunsPage(Math.min(runsTotalPages, runsPage + 1))} disabled={runsPage === runsTotalPages}
+                      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      Next <ChevronRight className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => setRunsPage(runsTotalPages)} disabled={runsPage === runsTotalPages}
+                      className="h-7 px-1.5 inline-flex items-center rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronsRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
