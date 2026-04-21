@@ -7,6 +7,7 @@ import {
   RefreshCw, Power, Play, Square, Zap, Sparkles, Layers, Clock, Trash2,
   Heart, AlertOctagon, History as HistoryIcon, Pause, PlayCircle,
   ShieldAlert, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Save,
+  Cookie, KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -97,6 +98,9 @@ const AdminXisoraStatus = () => {
     refetchInterval: 15000,
   });
   const [enToggling, setEnToggling] = useState(false);
+  // Cookie-paste state
+  const [cookieInput, setCookieInput] = useState("");
+  const [cookieSaving, setCookieSaving] = useState(false);
   useEffect(() => {
     if (arData) {
       setArEnabled(arData.enabled);
@@ -200,6 +204,32 @@ const AdminXisoraStatus = () => {
     } catch (e) {
       toast.error("Toggle failed: " + (e as Error).message);
     } finally { setEnToggling(false); }
+  };
+
+  const { data: cookieData, refetch: refetchCookie } = useQuery({
+    queryKey: ["xisora-cookie"],
+    queryFn: () => api.admin.xisoraCookie(),
+    refetchInterval: 30000,
+  });
+  const handleSaveCookie = async () => {
+    const v = cookieInput.trim();
+    if (!v) { toast.error("Paste a PHPSESSID value first"); return; }
+    setCookieSaving(true);
+    try {
+      const r = await api.admin.xisoraCookieSave(v);
+      toast.success(`Cookie saved (${r.length} chars). Now click Restart to use it.`);
+      setCookieInput("");
+      refetchCookie();
+    } catch (e) { toast.error("Save failed: " + (e as Error).message); }
+    finally { setCookieSaving(false); }
+  };
+  const handleClearCookie = async () => {
+    if (!confirm("Clear the saved XISORA session cookie? The bot will fail to log in until you paste a new one.")) return;
+    try {
+      await api.admin.xisoraCookieSave("");
+      toast.success("Cookie cleared");
+      refetchCookie();
+    } catch (e) { toast.error("Clear failed: " + (e as Error).message); }
   };
 
   return (
