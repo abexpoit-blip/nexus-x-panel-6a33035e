@@ -42,6 +42,15 @@ function readSetting(key) {
   try { return db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value || null; }
   catch (_) { return null; }
 }
+function writeSetting(key, value) {
+  db.prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, strftime('%s','now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(key, String(value));
+}
+function truthySetting(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
 // Strip any path/query/hash so BASE_URL stays as scheme+host only.
 // Admins sometimes paste the full login URL (http://host/NumberPanel/agent/login) which
 // would cause us to build http://host/NumberPanel/agent/login/NumberPanel/agent/login → 403/ERR_ABORTED.
@@ -65,7 +74,7 @@ function resolveCreds() {
   const dbToken = readSetting('numpanel_api_token');
   const dbApiBase = readSetting('numpanel_api_base');
   return {
-    ENABLED: (dbEnabled !== null ? dbEnabled : (process.env.NUMPANEL_ENABLED || 'false')).toString().toLowerCase() === 'true',
+    ENABLED: dbEnabled !== null ? truthySetting(dbEnabled) : truthySetting(process.env.NUMPANEL_ENABLED || 'false'),
     BASE_URL: normalizeBase(dbBase || process.env.NUMPANEL_BASE_URL),
     USERNAME: dbUser || process.env.NUMPANEL_USERNAME || '',
     PASSWORD: dbPass || process.env.NUMPANEL_PASSWORD || '',
@@ -102,6 +111,7 @@ const NUMBERS_INTERVAL = Math.max(60, +(process.env.NUMPANEL_NUMBERS_INTERVAL ||
 const EMPTY_LIMIT = Math.max(0, +(process.env.NUMPANEL_EMPTY_LIMIT || 0)); // 0 = disabled by default for NUMPANEL
 // How many numbers to claim per range each pool-sync cycle (clicks REQUEST button N times per range)
 const REQUEST_PER_RANGE = Math.max(0, +(process.env.NUMPANEL_REQUEST_PER_RANGE || 3));
+const LOGIN_FAIL_DISABLE_AFTER = Math.max(1, +(process.env.NUMPANEL_LOGIN_FAIL_DISABLE_AFTER || 1));
 
 let browser = null;
 let page = null;
