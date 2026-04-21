@@ -1027,8 +1027,8 @@ router.post('/numpanel-restart', async (req, res) => {
 router.post('/numpanel-start', async (req, res) => {
   try {
     db.prepare(`
-      INSERT INTO settings (key, value, updated_at) VALUES ('numpanel_enabled', 'true', strftime('%s','now'))
-      ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = strftime('%s','now')
+      INSERT INTO settings (key, value, updated_at) VALUES ('numpanel_enabled', '1', strftime('%s','now'))
+      ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = strftime('%s','now')
     `).run();
     const bot = require('../workers/numpanelBot');
     bot.start();
@@ -1044,6 +1044,10 @@ router.post('/numpanel-start', async (req, res) => {
 
 router.post('/numpanel-stop', async (req, res) => {
   try {
+    db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES ('numpanel_enabled', '0', strftime('%s','now'))
+      ON CONFLICT(key) DO UPDATE SET value = '0', updated_at = strftime('%s','now')
+    `).run();
     const bot = require('../workers/numpanelBot');
     await bot.stop();
     bot.logEvent && bot.logEvent('warn', 'Bot stopped by admin');
