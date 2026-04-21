@@ -67,6 +67,9 @@ let otpTimer = null;
 let numbersTimer = null;
 let _stopped = false;
 let emptyStreak = 0;
+let lastHeartbeatAt = 0;        // updated every OTP poll cycle (success or fail)
+let queueDepth = 0;             // # of active allocations awaiting OTP
+let lastSuccessAt = 0;          // last successful poll (for stale detection)
 
 const status = {
   enabled: false,
@@ -100,15 +103,30 @@ function getStatus() {
     const claimingSize = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='claiming'").get().c;
     const activeAssigned = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='active'").get().c;
     const otpReceived = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='received'").get().c;
+    queueDepth = activeAssigned;
+    const now = Math.floor(Date.now() / 1000);
+    // "Stale session" = bot is running but no successful poll in the last 3 intervals
+    const staleThreshold = Math.max(30, OTP_INTERVAL * 3);
+    const sinceLastSuccess = lastSuccessAt ? now - lastSuccessAt : null;
+    const staleSession = !!(status.running && lastSuccessAt && sinceLastSuccess > staleThreshold);
     return {
       ...status, poolSize, claimingSize, activeAssigned, otpReceived,
       events: events.slice(),
       otpCacheSize: recentOtpCache.size,
       emptyStreak,
+      heartbeatAt: lastHeartbeatAt || null,
+      heartbeatAgeSec: lastHeartbeatAt ? now - lastHeartbeatAt : null,
+      queueDepth,
+      lastSuccessAt: lastSuccessAt || null,
+      sinceLastSuccessSec: sinceLastSuccess,
+      staleSession,
+      staleThresholdSec: staleThreshold,
     };
   } catch (_) {
     return { ...status, poolSize: 0, claimingSize: 0, activeAssigned: 0, otpReceived: 0,
-      events: events.slice(), otpCacheSize: 0, emptyStreak };
+      events: events.slice(), otpCacheSize: 0, emptyStreak,
+      heartbeatAt: null, heartbeatAgeSec: null, queueDepth: 0,
+      lastSuccessAt: null, sinceLastSuccessSec: null, staleSession: false, staleThresholdSec: 0 };
   }
 }
 
@@ -358,7 +376,14 @@ async function syncPool() {
     return { added: 0, removed: 0, kept: 0, scraped: 0 };
   }
   emptyStreak = 0;
-  const live = new Set(nums.map(n => n.phone_number));
+  // Apply per-range disable filter — admin can pause a range without deleting it
+  const disabledRanges = new Set(
+    db.prepare("SELECT range_prefix FROM xisora_range_meta WHERE COALESCE(disabled,0) = 1").all()
+      .map(r => r.range_prefix)
+  );
+  const filteredNums = nums.filter(n => !disabledRanges.has(n.operator || 'Unknown'));
+  const skipped = nums.length - filteredNums.length;
+  const live = new Set(filteredNums.map(n => n.phone_number));
   const sysUser = ensurePoolUser();
   let added = 0, removed = 0, kept = 0;
   const exists = db.prepare("SELECT 1 FROM allocations WHERE provider='xisora' AND phone_number=? AND status IN ('pool','active','claiming') LIMIT 1");
@@ -369,7 +394,7 @@ async function syncPool() {
   const poolRows = db.prepare("SELECT id, phone_number FROM allocations WHERE provider='xisora' AND status='pool'").all();
   const del = db.prepare("DELETE FROM allocations WHERE id = ?");
   const tx = db.transaction(() => {
-    for (const n of nums) {
+    for (const n of filteredNums) {
       if (exists.get(n.phone_number)) { kept++; continue; }
       ins.run(sysUser.id, n.phone_number, null, n.operator || null);
       added++;
@@ -381,32 +406,62 @@ async function syncPool() {
   tx();
   status.numbersScrapedTotal += nums.length;
   status.numbersAddedTotal += added;
-  if (added || removed) logEvent('success', `Pool sync: +${added} added, -${removed} removed, ${kept} kept (${nums.length} live)`);
+  if (added || removed || skipped) logEvent('success', `Pool sync: +${added} added, -${removed} removed, ${kept} kept, ${skipped} skipped (disabled) of ${nums.length} live`);
   return { added, removed, kept, scraped: nums.length };
+}
+
+// ---- Run history recorder ----
+function recordRun({ kind, startedAt, finishedAt, ok, otps, added, removed, kept, scraped, error, triggeredBy }) {
+  try {
+    db.prepare(`
+      INSERT INTO xisora_runs (kind, started_at, finished_at, duration_ms, ok, otps, added, removed, kept, scraped, error, triggered_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      kind, startedAt, finishedAt,
+      Math.max(0, (finishedAt - startedAt) * 1000),
+      ok ? 1 : 0,
+      otps || 0, added || 0, removed || 0, kept || 0, scraped || 0,
+      error || null, triggeredBy || 'admin',
+    );
+    // Keep table bounded (last 500 runs)
+    db.prepare(`DELETE FROM xisora_runs WHERE id NOT IN (SELECT id FROM xisora_runs ORDER BY id DESC LIMIT 500)`).run();
+  } catch (e) { dwarn('[xisora-bot] recordRun failed:', e.message); }
 }
 
 async function scrapeNow() {
   if (!status.running) return { ok: false, error: 'Bot is not running' };
   if (busy) return { ok: false, error: 'Already scraping' };
   busy = true;
+  const startedAt = Math.floor(Date.now() / 1000);
   try {
     if (!loggedIn) await login();
     const before = status.otpsDeliveredTotal;
     await deliverOtps();
-    return { ok: true, otps: status.otpsDeliveredTotal - before };
-  } catch (e) { return { ok: false, error: e.message }; }
+    const otps = status.otpsDeliveredTotal - before;
+    recordRun({ kind: 'scrape-now', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: true, otps, triggeredBy: 'admin' });
+    return { ok: true, otps };
+  } catch (e) {
+    recordRun({ kind: 'scrape-now', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: false, error: e.message, triggeredBy: 'admin' });
+    return { ok: false, error: e.message };
+  }
   finally { busy = false; }
 }
 async function syncLive() {
   if (!status.running) return { ok: false, error: 'Bot is not running' };
   if (busy) return { ok: false, error: 'Already syncing' };
   busy = true;
+  const startedAt = Math.floor(Date.now() / 1000);
   try {
     if (!loggedIn) await login();
     logEvent('info', 'Live-sync triggered by admin');
     const r = await syncPool();
+    recordRun({ kind: 'sync-live', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: true,
+      added: r.added, removed: r.removed, kept: r.kept, scraped: r.scraped, triggeredBy: 'admin' });
     return { ok: true, ...r };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    recordRun({ kind: 'sync-live', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: false, error: e.message, triggeredBy: 'admin' });
+    return { ok: false, error: e.message };
+  }
   finally { busy = false; }
 }
 
@@ -472,12 +527,15 @@ function start() {
           new Promise((_, rej) => setTimeout(() => rej(new Error('otp-poll timeout 60s')), 60000)),
         ]);
         status.consecFail = 0;
+        lastHeartbeatAt = Math.floor(Date.now() / 1000);
+        lastSuccessAt = lastHeartbeatAt;
         if (delivered > 0) console.log(`[xisora-bot] poll delivered ${delivered} OTP(s) in ${Date.now() - t0}ms`);
       } catch (e) {
         status.consecFail++;
         status.lastError = e.message;
         status.lastErrorAt = Math.floor(Date.now() / 1000);
         status.lastScrapeOk = false;
+        lastHeartbeatAt = Math.floor(Date.now() / 1000);   // heartbeat fires even on failure
         console.warn(`[xisora-bot] otp-poll fail #${status.consecFail}:`, e.message);
         logEvent('warn', `OTP poll failed (#${status.consecFail}): ${e.message}`);
         if (status.consecFail >= 3) {
