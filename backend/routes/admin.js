@@ -1480,14 +1480,46 @@ router.post('/xisora-range-toggle', (req, res) => {
 
 // GET /api/admin/xisora-runs — recent run history (scrape-now / sync-live / auto)
 router.get('/xisora-runs', (req, res) => {
-  const limit = Math.min(Math.max(+req.query.limit || 100, 1), 500);
+  const limit = Math.min(Math.max(+req.query.limit || 25, 1), 200);
+  const offset = Math.max(+req.query.offset || 0, 0);
+  const total = db.prepare(`SELECT COUNT(*) c FROM xisora_runs`).get().c;
   const rows = db.prepare(`
     SELECT id, kind, started_at, finished_at, duration_ms, ok, otps,
            added, removed, kept, scraped, error, triggered_by
     FROM xisora_runs
-    ORDER BY id DESC LIMIT ?
-  `).all(limit);
-  res.json({ runs: rows });
+    ORDER BY id DESC LIMIT ? OFFSET ?
+  `).all(limit, offset);
+  res.json({ runs: rows, total, limit, offset });
+});
+
+// GET /api/admin/xisora-autorestart — read auto-restart config
+router.get('/xisora-autorestart', (req, res) => {
+  const enabled = db.prepare(`SELECT value FROM settings WHERE key = 'xisora_autorestart_enabled'`).get()?.value;
+  const intervals = db.prepare(`SELECT value FROM settings WHERE key = 'xisora_autorestart_intervals'`).get()?.value;
+  const lastTs = db.prepare(`SELECT value FROM settings WHERE key = 'xisora_autorestart_last_ts'`).get()?.value;
+  const lastReason = db.prepare(`SELECT value FROM settings WHERE key = 'xisora_autorestart_last_reason'`).get()?.value;
+  res.json({
+    enabled: enabled === '1' || enabled === 'true',
+    intervals: Math.max(2, Math.min(60, +(intervals || 3))),
+    lastTriggerTs: lastTs ? +lastTs : null,
+    lastReason: lastReason || null,
+  });
+});
+
+// PUT /api/admin/xisora-autorestart — save auto-restart config
+router.put('/xisora-autorestart', (req, res) => {
+  const { enabled, intervals } = req.body || {};
+  const upsert = db.prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, strftime('%s','now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  if (typeof enabled === 'boolean') upsert.run('xisora_autorestart_enabled', enabled ? '1' : '0');
+  if (Number.isFinite(+intervals)) {
+    const clamped = Math.max(2, Math.min(60, Math.floor(+intervals)));
+    upsert.run('xisora_autorestart_intervals', String(clamped));
+  }
+  logFromReq(req, 'xisora_autorestart_update', { meta: { enabled, intervals } });
+  res.json({ ok: true });
 });
 
 module.exports = router;

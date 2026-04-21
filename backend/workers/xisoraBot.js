@@ -54,6 +54,17 @@ function resolveOtpInterval() {
   const e = +(process.env.XISORA_SCRAPE_INTERVAL || 4);
   return Math.max(2, d > 0 ? d : e);
 }
+function resolveAutoRestart() {
+  const en = readSetting('xisora_autorestart_enabled');
+  const iv = +(readSetting('xisora_autorestart_intervals') || 3);
+  return {
+    enabled: en === '1' || en === 'true',
+    intervals: Math.max(2, Math.min(60, Number.isFinite(iv) ? iv : 3)),
+  };
+}
+let _autoRestartInProgress = false;
+let _lastAutoRestartTs = 0;
+const AUTO_RESTART_COOLDOWN = 60; // seconds — never auto-restart more than once per minute
 
 let { ENABLED, BASE_URL, USERNAME, PASSWORD } = resolveCreds();
 let OTP_INTERVAL = resolveOtpInterval();
