@@ -153,6 +153,13 @@ function _request(method, urlStr, { body = null, formData = null, redirect = 'fo
       'Accept-Language': 'en-US,en;q=0.9',
     };
     if (cookieStr) headers['Cookie'] = cookieStr;
+    // XISORA's ajax endpoints reject requests without these (returns "Direct Access not allowed")
+    if (/\/ajax\//.test(parsed.pathname)) {
+      headers['Referer'] = `${BASE_URL}/sms/client/`;
+      headers['X-Requested-With'] = 'XMLHttpRequest';
+    } else if (/\/sms\//.test(parsed.pathname)) {
+      headers['Referer'] = `${BASE_URL}/sms/SignIn`;
+    }
     let payload = null;
     if (formData) {
       payload = new URLSearchParams(formData).toString();
@@ -204,148 +211,37 @@ function _request(method, urlStr, { body = null, formData = null, redirect = 'fo
   });
 }
 
-// Same as _request but returns the raw response body as a Buffer (for images).
-function _requestBinary(urlStr, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    let parsed;
-    try { parsed = new URL(urlStr); } catch (e) { return reject(e); }
-    const lib = parsed.protocol === 'https:' ? https : http;
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 NexusX-XisoraBot/1.0',
-      'Accept': 'image/*,*/*',
-    };
-    if (cookieStr) headers['Cookie'] = cookieStr;
-    const req = lib.request({
-      method: 'GET',
-      hostname: parsed.hostname,
-      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      headers,
-      timeout: timeoutMs,
-    }, (res) => {
-      const sc = res.headers['set-cookie'];
-      if (sc && sc.length) {
-        const jar = new Map();
-        for (const pair of cookieStr.split(/;\s*/)) {
-          const eq = pair.indexOf('=');
-          if (eq > 0) jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
-        }
-        for (const c of sc) {
-          const first = c.split(';')[0];
-          const eq = first.indexOf('=');
-          if (eq > 0) jar.set(first.slice(0, eq).trim(), first.slice(eq + 1).trim());
-        }
-        cookieStr = Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
-      }
-      const chunks = [];
-      res.on('data', (c) => { chunks.push(c); });
-      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(chunks), headers: res.headers }));
-    });
-    req.on('timeout', () => { req.destroy(new Error('http timeout')); });
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-// Solve a XISORA captcha PNG via Lovable AI Gateway (Gemini Flash vision).
-// Returns the cleaned alphanumeric answer, or throws.
-async function solveCaptcha(pngBuffer) {
-  const apiKey = process.env.LOVABLE_API_KEY || readSetting('lovable_api_key');
-  if (!apiKey) {
-    throw new Error('LOVABLE_API_KEY not set — cannot solve XISORA captcha. Add it to backend/.env');
-  }
-  const b64 = pngBuffer.toString('base64');
-  const payload = JSON.stringify({
-    model: 'google/gemini-2.5-flash',
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'text', text: 'This is a captcha image. Reply with ONLY the characters shown, exactly as they appear (case-sensitive, alphanumeric). No spaces, no punctuation, no explanation.' },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
-      ],
-    }],
-  });
-  const res = await new Promise((resolve, reject) => {
-    const req = https.request({
-      method: 'POST',
-      hostname: 'ai.gateway.lovable.dev',
-      path: '/v1/chat/completions',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-      },
-      timeout: 20000,
-    }, (r) => {
-      let buf = '';
-      r.setEncoding('utf8');
-      r.on('data', (c) => { buf += c; });
-      r.on('end', () => resolve({ status: r.statusCode, body: buf }));
-    });
-    req.on('timeout', () => { req.destroy(new Error('ai timeout')); });
-    req.on('error', reject);
-    req.write(payload);
-    req.end();
-  });
-  if (res.status === 429) throw new Error('AI gateway rate-limited (429) — wait and retry');
-  if (res.status === 402) throw new Error('AI gateway payment required (402) — top up Lovable AI credits');
-  if (res.status !== 200) throw new Error(`AI gateway HTTP ${res.status}: ${res.body.slice(0, 200)}`);
-  let json;
-  try { json = JSON.parse(res.body); } catch (_) { throw new Error('AI gateway non-JSON response'); }
-  const raw = json?.choices?.[0]?.message?.content || '';
-  const cleaned = String(raw).trim().replace(/[^A-Za-z0-9]/g, '');
-  if (!cleaned || cleaned.length < 3 || cleaned.length > 10) {
-    throw new Error(`AI returned invalid captcha answer: "${raw}"`);
-  }
-  return cleaned;
-}
-
-// ---- Login (with AI-solved image captcha) ----
+// ---- "Login" via admin-pasted PHPSESSID cookie ----
+// XISORA's SignIn page has a graphical captcha that we deliberately do NOT solve.
+// Instead, the admin logs in via a real browser and pastes the PHPSESSID into the panel.
+// The bot then uses that cookie until XISORA expires it (then admin pastes a new one).
 async function login() {
-  if (!USERNAME || !PASSWORD) throw new Error('XISORA credentials not set');
-  const MAX_ATTEMPTS = 3;
-  let lastErr = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      // Step 1: fresh PHPSESSID
-      cookieStr = '';
-      await _request('GET', `${BASE_URL}/sms/SignIn`, { redirect: 'manual' }, 15000);
-      if (!cookieStr) throw new Error('Failed to obtain session cookie from /sms/SignIn');
-      // Step 2: fetch captcha bound to this session
-      const cap = await _requestBinary(`${BASE_URL}/sms/captcha.php?rand=${Date.now()}`, 15000);
-      if (cap.status !== 200 || !cap.buffer || cap.buffer.length < 100) {
-        throw new Error(`captcha fetch HTTP ${cap.status} (size=${cap.buffer?.length || 0})`);
-      }
-      const answer = await solveCaptcha(cap.buffer);
-      logEvent('info', `Captcha solved (attempt ${attempt}): "${answer}"`);
-      // Step 3: POST signmein with captcha
-      const r = await _request('POST', `${BASE_URL}/sms/signmein`, {
-        formData: { username: USERNAME, password: PASSWORD, capt: answer },
-        redirect: 'manual',
-      }, 15000);
-      if (![200, 302, 303].includes(r.status)) {
-        throw new Error(`Login POST returned HTTP ${r.status}`);
-      }
-      // Step 4: verify
-      const v = await _request('GET', `${BASE_URL}/sms/client/`, { redirect: 'manual' }, 15000);
-      if (v.status !== 200 || /SignIn|Enter Credentials|Invalid Captcha|Invalid Credentials/i.test(v.body)) {
-        throw new Error('Login rejected — bad captcha or credentials (still on SignIn)');
-      }
-      // success
-      lastErr = null;
-      break;
-    } catch (e) {
-      lastErr = e;
-      logEvent('warn', `Login attempt ${attempt}/${MAX_ATTEMPTS} failed: ${e.message}`);
-      if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 1500));
-    }
+  const pasted = (readSetting('xisora_session_cookie') || '').trim();
+  if (!pasted) {
+    loggedIn = false;
+    status.loggedIn = false;
+    throw new Error('No session cookie set — paste PHPSESSID from your browser into Admin → XISORA Bot → Session Cookie');
   }
-  if (lastErr) throw lastErr;
+  // Accept either bare value ("g09k...") or full pair ("PHPSESSID=g09k..."), or a longer cookie header.
+  let cookieValue = pasted;
+  if (!/=/.test(cookieValue)) cookieValue = `PHPSESSID=${cookieValue}`;
+  cookieStr = cookieValue;
+  // Verify session is still valid by hitting /sms/client/
+  const v = await _request('GET', `${BASE_URL}/sms/client/`, { redirect: 'manual' }, 15000);
+  if (v.status !== 200 || /SignIn|Enter Credentials/i.test(v.body)) {
+    loggedIn = false;
+    status.loggedIn = false;
+    cookieStr = '';
+    throw new Error('Session cookie rejected — log into XISORA in your browser and paste a fresh PHPSESSID');
+  }
+  // Best-effort: extract logged-in username from dashboard for status display
+  const m = v.body.match(/(\w+)\s*-\s*Client/i);
+  const who = m ? m[1] : USERNAME || 'unknown';
   loggedIn = true;
   status.loggedIn = true;
   status.lastLoginAt = Math.floor(Date.now() / 1000);
-  console.log(`[xisora-bot] ✓ logged in as ${USERNAME}`);
-  logEvent('success', `Logged in as ${USERNAME}`);
+  console.log(`[xisora-bot] ✓ session cookie accepted (logged in as ${who})`);
+  logEvent('success', `Session cookie accepted — logged in as ${who}`);
 }
 
 // ---- Scrape My Numbers via dt_numbers.php DataTables endpoint ----

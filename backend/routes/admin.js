@@ -1547,5 +1547,40 @@ router.put('/xisora-enabled', (req, res) => {
   res.json({ ok: true, enabled, db_path: dbPath });
 });
 
+// GET /api/admin/xisora-cookie — read current PHPSESSID (masked)
+router.get('/xisora-cookie', (req, res) => {
+  const row = db.prepare(`SELECT value, updated_at FROM settings WHERE key = 'xisora_session_cookie'`).get();
+  const v = (row?.value || '').trim();
+  const masked = v
+    ? v.length <= 8 ? '••••' : `${v.slice(0, 4)}••••${v.slice(-4)}`
+    : '';
+  res.json({
+    has_cookie: !!v,
+    masked,
+    length: v.length,
+    updated_at: row?.updated_at ? +row.updated_at : null,
+  });
+});
+
+// PUT /api/admin/xisora-cookie — save the pasted PHPSESSID
+router.put('/xisora-cookie', (req, res) => {
+  let { cookie } = req.body || {};
+  cookie = typeof cookie === 'string' ? cookie.trim() : '';
+  if (!cookie) {
+    db.prepare(`DELETE FROM settings WHERE key = 'xisora_session_cookie'`).run();
+    logFromReq(req, 'xisora_cookie_clear');
+    return res.json({ ok: true, has_cookie: false, length: 0 });
+  }
+  // Strip a leading "PHPSESSID=" if present, accept bare value or full pair
+  // (we re-add the prefix in the worker if missing).
+  if (cookie.length > 256) cookie = cookie.slice(0, 256);
+  db.prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES ('xisora_session_cookie', ?, strftime('%s','now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(cookie);
+  logFromReq(req, 'xisora_cookie_save', { meta: { length: cookie.length } });
+  res.json({ ok: true, has_cookie: true, length: cookie.length });
+});
+
 module.exports = router;
 
