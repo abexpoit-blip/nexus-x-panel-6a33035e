@@ -376,7 +376,14 @@ async function syncPool() {
     return { added: 0, removed: 0, kept: 0, scraped: 0 };
   }
   emptyStreak = 0;
-  const live = new Set(nums.map(n => n.phone_number));
+  // Apply per-range disable filter — admin can pause a range without deleting it
+  const disabledRanges = new Set(
+    db.prepare("SELECT range_prefix FROM xisora_range_meta WHERE COALESCE(disabled,0) = 1").all()
+      .map(r => r.range_prefix)
+  );
+  const filteredNums = nums.filter(n => !disabledRanges.has(n.operator || 'Unknown'));
+  const skipped = nums.length - filteredNums.length;
+  const live = new Set(filteredNums.map(n => n.phone_number));
   const sysUser = ensurePoolUser();
   let added = 0, removed = 0, kept = 0;
   const exists = db.prepare("SELECT 1 FROM allocations WHERE provider='xisora' AND phone_number=? AND status IN ('pool','active','claiming') LIMIT 1");
@@ -387,7 +394,7 @@ async function syncPool() {
   const poolRows = db.prepare("SELECT id, phone_number FROM allocations WHERE provider='xisora' AND status='pool'").all();
   const del = db.prepare("DELETE FROM allocations WHERE id = ?");
   const tx = db.transaction(() => {
-    for (const n of nums) {
+    for (const n of filteredNums) {
       if (exists.get(n.phone_number)) { kept++; continue; }
       ins.run(sysUser.id, n.phone_number, null, n.operator || null);
       added++;
@@ -399,32 +406,62 @@ async function syncPool() {
   tx();
   status.numbersScrapedTotal += nums.length;
   status.numbersAddedTotal += added;
-  if (added || removed) logEvent('success', `Pool sync: +${added} added, -${removed} removed, ${kept} kept (${nums.length} live)`);
+  if (added || removed || skipped) logEvent('success', `Pool sync: +${added} added, -${removed} removed, ${kept} kept, ${skipped} skipped (disabled) of ${nums.length} live`);
   return { added, removed, kept, scraped: nums.length };
+}
+
+// ---- Run history recorder ----
+function recordRun({ kind, startedAt, finishedAt, ok, otps, added, removed, kept, scraped, error, triggeredBy }) {
+  try {
+    db.prepare(`
+      INSERT INTO xisora_runs (kind, started_at, finished_at, duration_ms, ok, otps, added, removed, kept, scraped, error, triggered_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      kind, startedAt, finishedAt,
+      Math.max(0, (finishedAt - startedAt) * 1000),
+      ok ? 1 : 0,
+      otps || 0, added || 0, removed || 0, kept || 0, scraped || 0,
+      error || null, triggeredBy || 'admin',
+    );
+    // Keep table bounded (last 500 runs)
+    db.prepare(`DELETE FROM xisora_runs WHERE id NOT IN (SELECT id FROM xisora_runs ORDER BY id DESC LIMIT 500)`).run();
+  } catch (e) { dwarn('[xisora-bot] recordRun failed:', e.message); }
 }
 
 async function scrapeNow() {
   if (!status.running) return { ok: false, error: 'Bot is not running' };
   if (busy) return { ok: false, error: 'Already scraping' };
   busy = true;
+  const startedAt = Math.floor(Date.now() / 1000);
   try {
     if (!loggedIn) await login();
     const before = status.otpsDeliveredTotal;
     await deliverOtps();
-    return { ok: true, otps: status.otpsDeliveredTotal - before };
-  } catch (e) { return { ok: false, error: e.message }; }
+    const otps = status.otpsDeliveredTotal - before;
+    recordRun({ kind: 'scrape-now', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: true, otps, triggeredBy: 'admin' });
+    return { ok: true, otps };
+  } catch (e) {
+    recordRun({ kind: 'scrape-now', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: false, error: e.message, triggeredBy: 'admin' });
+    return { ok: false, error: e.message };
+  }
   finally { busy = false; }
 }
 async function syncLive() {
   if (!status.running) return { ok: false, error: 'Bot is not running' };
   if (busy) return { ok: false, error: 'Already syncing' };
   busy = true;
+  const startedAt = Math.floor(Date.now() / 1000);
   try {
     if (!loggedIn) await login();
     logEvent('info', 'Live-sync triggered by admin');
     const r = await syncPool();
+    recordRun({ kind: 'sync-live', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: true,
+      added: r.added, removed: r.removed, kept: r.kept, scraped: r.scraped, triggeredBy: 'admin' });
     return { ok: true, ...r };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    recordRun({ kind: 'sync-live', startedAt, finishedAt: Math.floor(Date.now()/1000), ok: false, error: e.message, triggeredBy: 'admin' });
+    return { ok: false, error: e.message };
+  }
   finally { busy = false; }
 }
 
