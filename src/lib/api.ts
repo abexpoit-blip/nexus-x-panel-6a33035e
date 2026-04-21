@@ -569,6 +569,11 @@ export const api = {
       request<{ ok: boolean }>("/admin/xisora-autorestart", {
         method: "PUT", body: JSON.stringify(body),
       }),
+    xisoraEnabled: () => request<{ enabled: boolean; db_path: string | null }>("/admin/xisora-enabled"),
+    xisoraEnabledSave: (enabled: boolean) =>
+      request<{ ok: boolean; enabled: boolean; db_path: string | null }>("/admin/xisora-enabled", {
+        method: "PUT", body: JSON.stringify({ enabled }),
+      }),
     otpExpiry: () => request<{
       expiry_sec: number; expiry_min: number; source: string;
       min: number; max: number; options_min: number[];
