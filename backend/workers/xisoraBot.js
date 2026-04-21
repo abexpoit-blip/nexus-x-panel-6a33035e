@@ -54,6 +54,17 @@ function resolveOtpInterval() {
   const e = +(process.env.XISORA_SCRAPE_INTERVAL || 4);
   return Math.max(2, d > 0 ? d : e);
 }
+function resolveAutoRestart() {
+  const en = readSetting('xisora_autorestart_enabled');
+  const iv = +(readSetting('xisora_autorestart_intervals') || 3);
+  return {
+    enabled: en === '1' || en === 'true',
+    intervals: Math.max(2, Math.min(60, Number.isFinite(iv) ? iv : 3)),
+  };
+}
+let _autoRestartInProgress = false;
+let _lastAutoRestartTs = 0;
+const AUTO_RESTART_COOLDOWN = 60; // seconds — never auto-restart more than once per minute
 
 let { ENABLED, BASE_URL, USERNAME, PASSWORD } = resolveCreds();
 let OTP_INTERVAL = resolveOtpInterval();
@@ -545,6 +556,40 @@ function start() {
     }, OTP_INTERVAL * 1000);
   }
   scheduleOtp();
+  // ---- Auto-restart watchdog: checks every OTP_INTERVAL whether the
+  //      session is stale for N consecutive intervals and restarts.
+  setInterval(async () => {
+    if (_stopped || _autoRestartInProgress) return;
+    const cfg = resolveAutoRestart();
+    if (!cfg.enabled) return;
+    if (!status.running) return;
+    const now = Math.floor(Date.now() / 1000);
+    if (now - _lastAutoRestartTs < AUTO_RESTART_COOLDOWN) return;
+    // Stale = no successful poll in (intervals × OTP_INTERVAL) seconds
+    const threshold = Math.max(30, cfg.intervals * OTP_INTERVAL);
+    if (!lastSuccessAt) return;
+    const since = now - lastSuccessAt;
+    if (since < threshold) return;
+    _autoRestartInProgress = true;
+    _lastAutoRestartTs = now;
+    const reason = `Stale session: no successful poll in ${since}s (threshold ${threshold}s, ${cfg.intervals} intervals × ${OTP_INTERVAL}s)`;
+    try {
+      db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES (?, ?, strftime('%s','now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run('xisora_autorestart_last_ts', String(now));
+      db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES (?, ?, strftime('%s','now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run('xisora_autorestart_last_reason', reason);
+    } catch (_) {}
+    console.warn(`[xisora-bot] AUTO-RESTART triggered — ${reason}`);
+    logEvent('warn', `Auto-restart triggered: ${reason}`);
+    recordRun({ kind: 'auto-restart', startedAt: now, finishedAt: now, ok: true, error: reason, triggeredBy: 'watchdog' });
+    try { await restart(); }
+    catch (e) { logEvent('error', 'Auto-restart failed: ' + e.message); }
+    finally { _autoRestartInProgress = false; }
+  }, Math.max(5, OTP_INTERVAL) * 1000);
   numbersTimer = setInterval(async () => {
     if (busy || !loggedIn) return;
     busy = true;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { GradientMesh, PageHeader } from "@/components/premium";
@@ -6,6 +6,7 @@ import {
   Bot, CheckCircle2, XCircle, Activity, Database, MessageSquareText,
   RefreshCw, Power, Play, Square, Zap, Sparkles, Layers, Clock, Trash2,
   Heart, AlertOctagon, History as HistoryIcon, Pause, PlayCircle,
+  ShieldAlert, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -62,6 +63,13 @@ const AdminXisoraStatus = () => {
   const [busy, setBusy] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Run-history pagination
+  const [runsPage, setRunsPage] = useState(1);
+  const RUNS_PAGE_SIZE = 25;
+  // Auto-restart settings (local form state, hydrated from query)
+  const [arEnabled, setArEnabled] = useState(false);
+  const [arIntervals, setArIntervals] = useState(3);
+  const [arSaving, setArSaving] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["xisora-status"],
@@ -74,11 +82,39 @@ const AdminXisoraStatus = () => {
     refetchInterval: 10000,
   });
   const { data: runsData, refetch: refetchRuns } = useQuery({
-    queryKey: ["xisora-runs"],
-    queryFn: () => api.admin.xisoraRuns(50),
+    queryKey: ["xisora-runs", runsPage],
+    queryFn: () => api.admin.xisoraRuns(RUNS_PAGE_SIZE, (runsPage - 1) * RUNS_PAGE_SIZE),
     refetchInterval: 8000,
   });
+  const { data: arData, refetch: refetchAr } = useQuery({
+    queryKey: ["xisora-autorestart"],
+    queryFn: () => api.admin.xisoraAutoRestart(),
+    refetchInterval: 15000,
+  });
+  useEffect(() => {
+    if (arData) {
+      setArEnabled(arData.enabled);
+      setArIntervals(arData.intervals);
+    }
+  }, [arData]);
   const s = data?.status as XisoraStatus | undefined;
+
+  const runsTotal = runsData?.total ?? 0;
+  const runsTotalPages = Math.max(1, Math.ceil(runsTotal / RUNS_PAGE_SIZE));
+  useEffect(() => {
+    if (runsPage > runsTotalPages) setRunsPage(runsTotalPages);
+  }, [runsTotalPages, runsPage]);
+
+  const handleSaveAutoRestart = async () => {
+    setArSaving(true);
+    try {
+      await api.admin.xisoraAutoRestartSave({ enabled: arEnabled, intervals: arIntervals });
+      toast.success(`Auto-restart ${arEnabled ? "enabled" : "disabled"} (${arIntervals} intervals)`);
+      refetchAr();
+    } catch (e) {
+      toast.error("Save failed: " + (e as Error).message);
+    } finally { setArSaving(false); }
+  };
 
   const handleAction = async (action: "restart" | "start" | "stop") => {
     const labels = { restart: "Restart", start: "Start", stop: "Stop" };
@@ -251,6 +287,51 @@ const AdminXisoraStatus = () => {
             </div>
           </div>
 
+          {/* Auto-restart settings */}
+          <div className="glass-card border border-white/[0.06] rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-neon-amber" />
+                Stale-session auto-restart
+              </div>
+              {arData?.lastTriggerTs && (
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  last trigger <span className="font-mono text-neon-amber">{fmtAgo(arData.lastTriggerTs)}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="inline-flex items-center gap-2 text-xs cursor-pointer select-none">
+                <input type="checkbox" checked={arEnabled}
+                  onChange={(e) => setArEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded accent-neon-cyan" />
+                <span className="font-semibold">Enable auto-restart</span>
+              </label>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Restart after</span>
+                <input type="number" min={2} max={60} value={arIntervals}
+                  onChange={(e) => setArIntervals(Math.max(2, Math.min(60, +e.target.value || 3)))}
+                  className="w-16 px-2 py-1 bg-white/[0.04] border border-white/[0.08] rounded font-mono text-center text-xs focus:outline-none focus:border-neon-cyan/50" />
+                <span className="text-muted-foreground">stale intervals
+                  {s && <span className="font-mono text-neon-cyan ml-1">(≈{arIntervals * s.otpIntervalSec}s)</span>}
+                </span>
+              </div>
+              <button onClick={handleSaveAutoRestart} disabled={arSaving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan hover:bg-neon-cyan/20 transition disabled:opacity-50">
+                <Save className={cn("w-3.5 h-3.5", arSaving && "animate-pulse")} />
+                {arSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {arData?.lastReason && (
+              <div className="mt-2 text-[11px] font-mono text-muted-foreground break-all">
+                <span className="text-neon-amber">↳</span> {arData.lastReason}
+              </div>
+            )}
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              When enabled, the worker watchdog will automatically call <span className="font-mono">restart()</span> if no successful OTP poll occurs for the configured number of intervals. 60s cooldown between auto-restarts.
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat icon={<Layers className="w-3.5 h-3.5" />} label="Pool size" value={s.poolSize ?? 0}
               hint={`${s.claimingSize ?? 0} claiming`} accent="text-neon-cyan" />
@@ -338,13 +419,16 @@ const AdminXisoraStatus = () => {
             </div>
           )}
 
-          {/* Run history */}
-          {runsData && runsData.runs.length > 0 && (
+          {/* Run history (paginated) */}
+          {runsData && runsTotal > 0 && (
             <div className="glass-card border border-white/[0.06] rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div className="text-sm font-semibold flex items-center gap-2">
                   <HistoryIcon className="w-4 h-4 text-neon-purple" />
-                  Run history ({runsData.runs.length})
+                  Run history
+                  <span className="text-xs text-muted-foreground font-normal ml-1">
+                    ({runsTotal} total · page {runsPage}/{runsTotalPages})
+                  </span>
                 </div>
                 <button onClick={() => refetchRuns()}
                   className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] uppercase tracking-wider bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition">
@@ -370,6 +454,7 @@ const AdminXisoraStatus = () => {
                           <span className={cn("inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
                             run.kind === "scrape-now" && "bg-neon-cyan/15 text-neon-cyan",
                             run.kind === "sync-live" && "bg-neon-amber/15 text-neon-amber",
+                            run.kind === "auto-restart" && "bg-destructive/15 text-destructive",
                             run.kind.startsWith("auto") && "bg-white/[0.05] text-muted-foreground",
                           )}>{run.kind}</span>
                         </td>
@@ -399,6 +484,32 @@ const AdminXisoraStatus = () => {
                   </tbody>
                 </table>
               </div>
+              {runsTotalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-white/[0.05]">
+                  <p className="text-[10px] text-muted-foreground">
+                    Showing <span className="font-mono text-foreground">{(runsPage - 1) * RUNS_PAGE_SIZE + 1}–{Math.min(runsPage * RUNS_PAGE_SIZE, runsTotal)}</span> of <span className="font-mono text-foreground">{runsTotal}</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setRunsPage(1)} disabled={runsPage === 1}
+                      className="h-7 px-1.5 inline-flex items-center rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronsLeft className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => setRunsPage(Math.max(1, runsPage - 1))} disabled={runsPage === 1}
+                      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronLeft className="w-3 h-3" /> Prev
+                    </button>
+                    <span className="px-2 text-[11px] font-mono text-foreground">{runsPage} / {runsTotalPages}</span>
+                    <button onClick={() => setRunsPage(Math.min(runsTotalPages, runsPage + 1))} disabled={runsPage === runsTotalPages}
+                      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      Next <ChevronRight className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => setRunsPage(runsTotalPages)} disabled={runsPage === runsTotalPages}
+                      className="h-7 px-1.5 inline-flex items-center rounded text-[11px] border bg-white/[0.04] border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronsRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
