@@ -528,6 +528,10 @@ export const api = {
       request<{ ok: boolean; interval_sec: number }>("/admin/ims-otp-interval", {
         method: "PUT", body: JSON.stringify({ interval_sec }),
       }),
+    msiCredentials: () => request<{
+      enabled: boolean; base_url: string; username: string;
+      password_masked: string; has_password: boolean;
+      source: { username: string; password: string };
     }>("/admin/msi-credentials"),
     msiCredentialsSave: (body: { username?: string; password?: string; base_url?: string; enabled?: boolean }) =>
       request<{ ok: boolean }>("/admin/msi-credentials", { method: "PUT", body: JSON.stringify(body) }),
