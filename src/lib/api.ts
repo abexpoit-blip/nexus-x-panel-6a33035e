@@ -574,6 +574,13 @@ export const api = {
       request<{ ok: boolean; enabled: boolean; db_path: string | null }>("/admin/xisora-enabled", {
         method: "PUT", body: JSON.stringify({ enabled }),
       }),
+    xisoraCookie: () => request<{
+      has_cookie: boolean; masked: string; length: number; updated_at: number | null;
+    }>("/admin/xisora-cookie"),
+    xisoraCookieSave: (cookie: string) =>
+      request<{ ok: boolean; has_cookie: boolean; length: number }>("/admin/xisora-cookie", {
+        method: "PUT", body: JSON.stringify({ cookie }),
+      }),
     otpExpiry: () => request<{
       expiry_sec: number; expiry_min: number; source: string;
       min: number; max: number; options_min: number[];
