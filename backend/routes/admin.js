@@ -1188,7 +1188,7 @@ router.put('/numpanel-credentials', async (req, res) => {
       }
       if (clean) upsert.run('numpanel_base_url', clean);
     }
-    if (typeof enabled === 'boolean') upsert.run('numpanel_enabled', enabled ? 'true' : 'false');
+    if (typeof enabled === 'boolean') upsert.run('numpanel_enabled', enabled ? '1' : '0');
     logFromReq(req, 'numpanel_credentials_updated', { meta: { username: username || '(unchanged)', enabled } });
     try {
       const bot = require('../workers/numpanelBot');
