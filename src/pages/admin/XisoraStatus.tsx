@@ -305,6 +305,52 @@ const AdminXisoraStatus = () => {
             {s.staleSession && <Pill ok={false} label="Stale session" />}
           </div>
 
+          {/* Session cookie panel — admin pastes PHPSESSID from browser */}
+          <div className={cn(
+            "glass-card rounded-xl p-4 border",
+            cookieData?.has_cookie ? "border-neon-green/25 bg-neon-green/5" : "border-neon-amber/40 bg-neon-amber/5"
+          )}>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <Cookie className={cn("w-4 h-4", cookieData?.has_cookie ? "text-neon-green" : "text-neon-amber")} />
+                Session Cookie (PHPSESSID)
+              </div>
+              <div className="text-[11px] text-muted-foreground font-mono">
+                {cookieData?.has_cookie
+                  ? <>Saved: <span className="text-foreground/80">{cookieData.masked}</span> · {cookieData.length} chars · {cookieData.updated_at ? fmtAgo(cookieData.updated_at) : "never"}</>
+                  : <span className="text-neon-amber">No cookie saved — bot cannot log in</span>}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 items-stretch">
+              <input
+                type="text"
+                value={cookieInput}
+                onChange={(e) => setCookieInput(e.target.value)}
+                placeholder="Paste PHPSESSID value (e.g. g09k07ikn1rhvqlmm9nq79lfri)"
+                className="flex-1 min-w-[260px] h-9 px-3 rounded-md text-xs font-mono bg-background/50 border border-white/[0.08] focus:border-neon-cyan/50 focus:outline-none"
+              />
+              <button
+                onClick={handleSaveCookie}
+                disabled={cookieSaving || !cookieInput.trim()}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs font-semibold bg-neon-cyan/15 border border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/25 transition disabled:opacity-50">
+                <Save className={cn("w-3.5 h-3.5", cookieSaving && "animate-pulse")} />
+                {cookieSaving ? "Saving…" : "Save Cookie"}
+              </button>
+              {cookieData?.has_cookie && (
+                <button
+                  onClick={handleClearCookie}
+                  className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs font-semibold bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20 transition">
+                  <Trash2 className="w-3.5 h-3.5" /> Clear
+                </button>
+              )}
+            </div>
+            <div className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+              <KeyRound className="inline w-3 h-3 mr-1 text-neon-amber" />
+              How: Open <span className="font-mono text-foreground/80">http://94.23.31.29/sms/SignIn</span> in your browser, log in,
+              then DevTools → Application → Cookies → copy the value of <span className="font-mono text-foreground/80">PHPSESSID</span> and paste here. Click Restart afterward.
+            </div>
+          </div>
+
           {/* Worker health panel */}
           <div className={cn(
             "glass-card rounded-xl p-4 border",
