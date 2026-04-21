@@ -91,6 +91,12 @@ const AdminXisoraStatus = () => {
     queryFn: () => api.admin.xisoraAutoRestart(),
     refetchInterval: 15000,
   });
+  const { data: enData, refetch: refetchEn } = useQuery({
+    queryKey: ["xisora-enabled"],
+    queryFn: () => api.admin.xisoraEnabled(),
+    refetchInterval: 15000,
+  });
+  const [enToggling, setEnToggling] = useState(false);
   useEffect(() => {
     if (arData) {
       setArEnabled(arData.enabled);
@@ -180,6 +186,20 @@ const AdminXisoraStatus = () => {
       toast.success(`Range "${range}" ${r.disabled ? "disabled" : "enabled"}`);
       refetchPool();
     } catch (e) { toast.error("Toggle failed: " + (e as Error).message); }
+  };
+
+  const handleToggleEnabled = async () => {
+    const next = !(enData?.enabled ?? s?.enabled ?? false);
+    if (!next && !confirm("Disable the XISORA bot? It will stop polling and refuse start until re-enabled.")) return;
+    setEnToggling(true);
+    try {
+      const r = await api.admin.xisoraEnabledSave(next);
+      toast.success(`Bot ${r.enabled ? "ENABLED" : "DISABLED"} · DB: ${r.db_path || "?"}`);
+      refetchEn();
+      setTimeout(() => refetch(), 1000);
+    } catch (e) {
+      toast.error("Toggle failed: " + (e as Error).message);
+    } finally { setEnToggling(false); }
   };
 
   return (
