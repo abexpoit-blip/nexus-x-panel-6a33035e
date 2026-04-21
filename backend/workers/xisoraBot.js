@@ -67,6 +67,9 @@ let otpTimer = null;
 let numbersTimer = null;
 let _stopped = false;
 let emptyStreak = 0;
+let lastHeartbeatAt = 0;        // updated every OTP poll cycle (success or fail)
+let queueDepth = 0;             // # of active allocations awaiting OTP
+let lastSuccessAt = 0;          // last successful poll (for stale detection)
 
 const status = {
   enabled: false,
@@ -100,15 +103,30 @@ function getStatus() {
     const claimingSize = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='claiming'").get().c;
     const activeAssigned = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='active'").get().c;
     const otpReceived = db.prepare("SELECT COUNT(*) c FROM allocations WHERE provider='xisora' AND status='received'").get().c;
+    queueDepth = activeAssigned;
+    const now = Math.floor(Date.now() / 1000);
+    // "Stale session" = bot is running but no successful poll in the last 3 intervals
+    const staleThreshold = Math.max(30, OTP_INTERVAL * 3);
+    const sinceLastSuccess = lastSuccessAt ? now - lastSuccessAt : null;
+    const staleSession = !!(status.running && lastSuccessAt && sinceLastSuccess > staleThreshold);
     return {
       ...status, poolSize, claimingSize, activeAssigned, otpReceived,
       events: events.slice(),
       otpCacheSize: recentOtpCache.size,
       emptyStreak,
+      heartbeatAt: lastHeartbeatAt || null,
+      heartbeatAgeSec: lastHeartbeatAt ? now - lastHeartbeatAt : null,
+      queueDepth,
+      lastSuccessAt: lastSuccessAt || null,
+      sinceLastSuccessSec: sinceLastSuccess,
+      staleSession,
+      staleThresholdSec: staleThreshold,
     };
   } catch (_) {
     return { ...status, poolSize: 0, claimingSize: 0, activeAssigned: 0, otpReceived: 0,
-      events: events.slice(), otpCacheSize: 0, emptyStreak };
+      events: events.slice(), otpCacheSize: 0, emptyStreak,
+      heartbeatAt: null, heartbeatAgeSec: null, queueDepth: 0,
+      lastSuccessAt: null, sinceLastSuccessSec: null, staleSession: false, staleThresholdSec: 0 };
   }
 }
 
