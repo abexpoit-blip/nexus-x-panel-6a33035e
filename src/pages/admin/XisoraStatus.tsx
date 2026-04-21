@@ -91,6 +91,12 @@ const AdminXisoraStatus = () => {
     queryFn: () => api.admin.xisoraAutoRestart(),
     refetchInterval: 15000,
   });
+  const { data: enData, refetch: refetchEn } = useQuery({
+    queryKey: ["xisora-enabled"],
+    queryFn: () => api.admin.xisoraEnabled(),
+    refetchInterval: 15000,
+  });
+  const [enToggling, setEnToggling] = useState(false);
   useEffect(() => {
     if (arData) {
       setArEnabled(arData.enabled);
@@ -182,6 +188,20 @@ const AdminXisoraStatus = () => {
     } catch (e) { toast.error("Toggle failed: " + (e as Error).message); }
   };
 
+  const handleToggleEnabled = async () => {
+    const next = !(enData?.enabled ?? s?.enabled ?? false);
+    if (!next && !confirm("Disable the XISORA bot? It will stop polling and refuse start until re-enabled.")) return;
+    setEnToggling(true);
+    try {
+      const r = await api.admin.xisoraEnabledSave(next);
+      toast.success(`Bot ${r.enabled ? "ENABLED" : "DISABLED"} · DB: ${r.db_path || "?"}`);
+      refetchEn();
+      setTimeout(() => refetch(), 1000);
+    } catch (e) {
+      toast.error("Toggle failed: " + (e as Error).message);
+    } finally { setEnToggling(false); }
+  };
+
   return (
     <div className="relative space-y-6">
       <GradientMesh variant="default" />
@@ -192,6 +212,17 @@ const AdminXisoraStatus = () => {
         icon={<Bot className="w-5 h-5 text-neon-cyan" />}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={handleToggleEnabled} disabled={enToggling}
+              title={enData?.db_path ? `Active DB: ${enData.db_path}` : "Toggle xisora_enabled in active DB"}
+              className={cn(
+                "inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-bold uppercase tracking-wide border transition disabled:opacity-50",
+                (enData?.enabled ?? s?.enabled)
+                  ? "bg-neon-green/15 border-neon-green/40 text-neon-green hover:bg-neon-green/25"
+                  : "bg-destructive/15 border-destructive/40 text-destructive hover:bg-destructive/25"
+              )}>
+              <Power className={cn("w-3.5 h-3.5", enToggling && "animate-spin")} />
+              {(enData?.enabled ?? s?.enabled) ? "Bot Enabled" : "Enable Bot"}
+            </button>
             {s?.running ? (
               <button onClick={() => handleAction("stop")} disabled={busy}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold bg-destructive/10 border border-destructive/30 text-destructive hover:bg-destructive/20 transition disabled:opacity-50">
@@ -226,6 +257,11 @@ const AdminXisoraStatus = () => {
           </div>
         }
       />
+      {enData?.db_path && (
+        <div className="text-[11px] font-mono text-muted-foreground -mt-3 px-1">
+          Active DB: <span className="text-foreground/80">{enData.db_path}</span>
+        </div>
+      )}
 
       {isLoading && <p className="text-center text-muted-foreground text-sm">Loading…</p>}
 
